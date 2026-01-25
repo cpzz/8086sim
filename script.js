@@ -210,6 +210,11 @@ function stepExecution() {
 
 // 运行执行
 function runExecution() {
+    // 先取消代码高亮
+    const instructionsList = document.getElementById('instructions-list');
+    const currentRows = instructionsList.querySelectorAll('.instructions-table-row.current');
+    currentRows.forEach(row => row.classList.remove('current'));
+
     // 清除之前的操作跟踪
     cpu.clearMemoryOperations();
     cpu.clearRegisterOperations();
@@ -737,10 +742,8 @@ function updateInstructionsDisplay() {
         const rowElement = document.createElement('div');
         rowElement.className = 'instructions-table-row';
 
-        // 检查是否是当前指令（只有在特定状态才高亮）
-        if (instruction.address === currentIP &&
-            currentState !== '执行中' &&
-            currentState !== '已执行完毕') {
+        // 检查是否是当前指令
+        if (instruction.address === currentIP) {
             rowElement.classList.add('current');
         }
 
