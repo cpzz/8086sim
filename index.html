@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>8086 CPU 模拟器</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>8086 CPU 模拟器</h1>
+        
+        <!-- 顶部：寄存器面板 -->
+        <div class="top-panel">
+            <h2>寄存器</h2>
+            <div class="registers-layout">
+                <!-- 通用寄存器面板 -->
+                <div class="register-panel">
+                    <h3>通用寄存器</h3>
+                    <div class="registers-container">
+                        <table class="register-table general-registers">
+                            <tr class="register-names">
+                                <td class="register-name general">AX</td>
+                                <td class="register-name general">AH</td>
+                                <td class="register-name general">AL</td>
+                                <td class="register-name general">BX</td>
+                                <td class="register-name general">BH</td>
+                                <td class="register-name general">BL</td>
+                                <td class="register-name general">CX</td>
+                                <td class="register-name general">CH</td>
+                                <td class="register-name general">CL</td>
+                                <td class="register-name general">DX</td>
+                                <td class="register-name general">DH</td>
+                                <td class="register-name general">DL</td>
+                            </tr>
+                            <tr class="register-values">
+                                <td id="ax">0000H</td>
+                                <td id="ah">00H</td>
+                                <td id="al">00H</td>
+                                <td id="bx">0000H</td>
+                                <td id="bh">00H</td>
+                                <td id="bl">00H</td>
+                                <td id="cx">0000H</td>
+                                <td id="ch">00H</td>
+                                <td id="cl">00H</td>
+                                <td id="dx">0000H</td>
+                                <td id="dh">00H</td>
+                                <td id="dl">00H</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- 指针/索引寄存器面板 -->
+                <div class="register-panel">
+                    <h3>指针/索引寄存器</h3>
+                    <div class="registers-container">
+                        <table class="register-table pointer-index-registers">
+                            <tr class="register-names">
+                                <td class="register-name index-pointer">SP</td>
+                                <td class="register-name index-pointer">BP</td>
+                                <td class="register-name instruction">IP</td>
+                                <td class="register-name index-pointer">SI</td>
+                                <td class="register-name index-pointer">DI</td>
+                            </tr>
+                            <tr class="register-values">
+                                <td id="sp">0000H</td>
+                                <td id="bp">0000H</td>
+                                <td id="ip">0000H</td>
+                                <td id="si">0000H</td>
+                                <td id="di">0000H</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- 段寄存器面板 -->
+                <div class="register-panel">
+                    <h3>段寄存器</h3>
+                    <div class="registers-container">
+                        <table class="register-table segment-registers">
+                            <tr class="register-names">
+                                <td class="register-name segment">CS</td>
+                                <td class="register-name segment">DS</td>
+                                <td class="register-name segment">SS</td>
+                                <td class="register-name segment">ES</td>
+                            </tr>
+                            <tr class="register-values">
+                                <td id="cs">0000H</td>
+                                <td id="ds">0000H</td>
+                                <td id="ss">0000H</td>
+                                <td id="es">0000H</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- 标记寄存器面板 -->
+                <div class="register-panel">
+                    <h3>标记寄存器</h3>
+                    <div class="registers-container">
+                        <table class="register-table flags-table">
+                            <tr class="register-names">
+                                <td class="flag-name">CF</td>
+                                <td class="flag-name">PF</td>
+                                <td class="flag-name">AF</td>
+                                <td class="flag-name">ZF</td>
+                                <td class="flag-name">SF</td>
+                                <td class="flag-name">TF</td>
+                                <td class="flag-name">IF</td>
+                                <td class="flag-name">DF</td>
+                                <td class="flag-name">OF</td>
+                            </tr>
+                            <tr class="register-values">
+                                <td id="cf">0</td>
+                                <td id="pf">0</td>
+                                <td id="af">0</td>
+                                <td id="zf">0</td>
+                                <td id="sf">0</td>
+                                <td id="tf">0</td>
+                                <td id="if">0</td>
+                                <td id="df">0</td>
+                                <td id="of">0</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 底部容器 -->
+        <div class="bottom-container">
+            <!-- 底部左侧：内存和显示控制面板 -->
+            <div class="bottom-left-panel">
+                <div class="memory-panel">
+                    <h2>内存和显示控制</h2>
+                    
+                    <!-- 内存段和显示控制选择tab -->
+                    <div class="memory-tabs">
+                        <button class="memory-tab active" data-segment="cs">代码段 (CS)</button>
+                        <button class="memory-tab" data-segment="ds">数据段 (DS)</button>
+                        <button class="memory-tab" data-segment="ss">堆栈段 (SS)</button>
+                        <button class="memory-tab" data-segment="es">附加段 (ES)</button>
+                        <button class="memory-tab" data-segment="display">显示控制</button>
+                    </div>
+                    
+                    <div class="memory-controls">
+                        <input type="text" id="memory-address-input" placeholder="偏移地址 (例如: 0x1000)">
+                        <button id="memory-go-btn">前往</button>
+                    </div>
+                    <div id="memory-grid" class="memory-grid">
+                        <!-- 内存内容将在这里动态生成 -->
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 底部右侧：代码面板 -->
+            <div class="bottom-right-panel">
+                <div class="code-panel">
+                    <!-- 顶部：标题和控制面板 -->
+                    <div class="code-control-header">
+                        <span class="header-item">代码</span>
+                        <span class="header-item status-indicator" id="status-indicator">[初始状态]</span>
+                        <div class="control-panel">
+                            <button id="load-btn">加载文件</button>
+                            <input type="file" id="file-input" accept=".asm" style="display: none;">
+                            <button id="step-btn">单步执行</button>
+                            <button id="run-btn">执行</button>
+                            <button id="pause-btn">暂停</button>
+                            <button id="reset-btn">重置</button>
+                        </div>
+                    </div>
+                    
+                    <!-- 代码表格 -->
+                    <div class="instructions-panel">
+                        <div class="instructions-table">
+                            <div class="instructions-table-header">
+                                <div class="instructions-table-cell address">偏移地址</div>
+                                <div class="instructions-table-cell machine-code">机器码</div>
+                                <div class="instructions-table-cell assembly">汇编指令</div>
+                                <div class="instructions-table-cell comment">注释</div>
+                            </div>
+                            <div id="instructions-list" class="instructions-table-body">
+                                <!-- 代码将在这里动态生成 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="memory.js"></script>
+    <script src="cpu.js"></script>
+    <script src="assembler.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
