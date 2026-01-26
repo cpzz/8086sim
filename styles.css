@@ -511,7 +511,7 @@ table.register-table td.register-changed {
     border-radius: 6px;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 14px;
-    max-height: 350px;
+    max-height: 470px;
     display: flex;
     flex-direction: column;
     overflow-x: auto;
@@ -523,6 +523,7 @@ table.register-table td.register-changed {
     background-color: #e9ecef;
     font-weight: 600;
     border-bottom: 1px solid #dee2e6;
+    flex-shrink: 0;
 }
 
 .instructions-table-body {
@@ -578,7 +579,6 @@ table.register-table td.register-changed {
     min-width: 180px;
     flex: 1;
     color: #6c757d;
-    font-style: italic;
 }
 
 .memory-tabs {
@@ -660,40 +660,89 @@ table.register-table td.register-changed {
 
 .memory-grid {
     background-color: white;
-    padding: 15px;
+    padding: 0;
     border-radius: 6px;
     border: 1px solid #dee2e6;
     max-height: 350px;
-    overflow-y: auto;
+    overflow: hidden;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 14px;
+    display: flex;
+    flex-direction: column;
+}
+
+.memory-header-container {
+    display: flex;
+    background-color: #e9ecef;
+    border-bottom: 2px solid #dee2e6;
+    padding: 6px 12px;
+    font-weight: 600;
+    color: #495057;
+    flex-shrink: 0;
+}
+
+.memory-body-container {
+    overflow-y: auto;
+    padding: 4px 12px;
+    flex: 1;
 }
 
 .memory-row {
     display: flex;
-    margin-bottom: 8px;
-    padding: 4px 0;
+    margin-bottom: 2px;
+    padding: 2px 0;
     border-bottom: 1px solid #f1f3f4;
+}
+
+.memory-row.memory-header {
+    background-color: #e9ecef;
+    border-bottom: 2px solid #dee2e6;
+    font-weight: 600;
+    color: #495057;
+    position: sticky;
+    top: 0;
+    z-index: 10;
 }
 
 .memory-address {
     width: 100px;
     color: #6c757d;
     font-weight: 500;
+    flex-shrink: 0;
+    padding-right: 8px;
 }
 
 .memory-bytes {
     display: flex;
-    gap: 12px;
+    gap: 6px;
     flex: 1;
+    min-width: 0;
 }
 
 .memory-byte {
-    width: 35px;
+    width: 28px;
     text-align: center;
-    padding: 2px 4px;
+    padding: 2px 2px;
     border-radius: 3px;
     transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.memory-byte.header {
+    width: 28px;
+}
+
+.memory-header-container .memory-byte.header {
+    background-color: transparent;
+    color: #495057;
+    font-weight: 600;
+}
+
+.memory-header-container .memory-address,
+.memory-header-container .memory-ascii {
+    background-color: transparent;
+    color: #495057;
+    font-weight: 600;
 }
 
 .memory-byte.read {
@@ -723,9 +772,12 @@ table.register-table td.register-changed {
 }
 
 .memory-ascii {
-    margin-left: 30px;
+    margin-left: 15px;
     color: #6c757d;
     font-style: italic;
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-width: 100px;
 }
 
 /* 显示控制样式 */

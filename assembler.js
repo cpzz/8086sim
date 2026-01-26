@@ -608,6 +608,17 @@ class Assembler {
                         originalLine: originalLine.trim()
                     };
                 }
+                if (operands[0] === 'ax' && operands[1] === 'bx') {
+                    // CMP AX, BX - mod=11, reg=000(AX), rm=011(BX), opcode=39
+                    return {
+                        address,
+                        opcode: 'CMP',
+                        operands: ['AX', 'BX'],
+                        machineCode: [0x39, 0xc3],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
                 break;
             case 'jmp':
                 if (operands.length === 1) {

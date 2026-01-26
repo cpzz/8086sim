@@ -10,6 +10,7 @@ let hasExecuted = false; // 跟踪是否已经执行了指令
 let isAtEnd = false; // 跟踪是否执行到了最后一条指令
 let currentState = '初始状态'; // 当前状态：初始状态、已加载文件、单步执行、执行中、已暂停、已执行完毕、遇到断点
 let segmentWriteAddresses = { cs: new Set(), ds: new Set(), ss: new Set(), es: new Set() }; // 各段写入的地址集合
+let stackDisplayBase = null; // 堆栈段显示的起始地址（固定后不再改变）
 
 // 初始化模拟器
 function initSimulator() {
@@ -30,6 +31,14 @@ function initSimulator() {
 function updateStatusIndicator(status) {
     const statusIndicator = document.getElementById('status-indicator');
     statusIndicator.textContent = `[${status}]`;
+}
+
+// 高亮IP寄存器
+function highlightIPRegister() {
+    const ipElement = document.getElementById('ip');
+    if (ipElement) {
+        ipElement.classList.add('register-changed');
+    }
 }
 
 // 初始化UI
@@ -123,7 +132,12 @@ function handleFileLoad(e) {
             hasExecuted = false;
             isAtEnd = false;
             currentState = '已加载文件';
-            
+            stackDisplayBase = null; // 重置堆栈显示基址
+
+            // 清除断点
+            breakpoints.clear();
+            cpu.breakpoints.clear();
+
             // 如果有指令，设置CPU的指令指针指向第一条指令的地址
             if (instructions.length > 0) {
                 cpu.ip = instructions[0].address;
@@ -167,9 +181,12 @@ function initializeSegmentMemory() {
     for (let i = totalInstructionLength; i < 65536; i++) {
         memory.write8(csBase + i, 0);
     }
-    
+
     // 数据段 (DS) 初始化 - 保持随机数据
-    // 堆栈段 (SS) 初始化 - 保持随机数据
+    // 堆栈段 (SS) 初始化 - 保持随机数据，但将栈顶的 FFFF 和 FFFE 设置为 0
+    const ssBase = cpu.getSegmentRegister('ss') << 4;
+    memory.write8(ssBase + 0xFFFE, 0);
+    memory.write8(ssBase + 0xFFFF, 0);
     // 附加段 (ES) 初始化 - 保持随机数据
 }
 
@@ -196,6 +213,10 @@ function stepExecution() {
     updateInstructionsDisplay();
     // 高亮寄存器值改变
     highlightRegisterChanges(registerOperations);
+
+    // 高亮IP寄存器
+    highlightIPRegister();
+
     // 更新状态指示器和当前状态
     if (isAtEnd) {
         currentState = '已执行完毕';
@@ -227,6 +248,8 @@ function runExecution() {
 
     // 执行步骤
     cpu.run();
+    // 确保cpu.running为false
+    cpu.running = false;
     // 设置执行状态
     hasExecuted = true;
     // 查找各段最后一次写入的地址
@@ -244,10 +267,14 @@ function runExecution() {
         // 如果没有执行完毕但cpu.running为false，说明遇到了断点
         currentState = '遇到断点';
         updateStatusIndicator('遇到断点');
+        // 高亮IP寄存器
+        highlightIPRegister();        
     } else {
         // 正常执行完（没有断点，也没有到达末尾）
         currentState = '单步执行';
         updateStatusIndicator('单步执行');
+        // 高亮IP寄存器
+        highlightIPRegister();
     }
 
     // 更新显示
@@ -258,6 +285,9 @@ function runExecution() {
     updateButtonStates(false);
     // 高亮寄存器值改变
     highlightRegisterChanges(registerOperations);
+
+    // 高亮IP寄存器
+    highlightIPRegister();
 }
 
 // 暂停执行
@@ -266,6 +296,9 @@ function pauseExecution() {
     currentState = '已暂停';
     // 更新指令列表显示，高亮当前指令
     updateInstructionsDisplay();
+
+    // 高亮IP寄存器
+    highlightIPRegister();
 }
 
 // 清除寄存器高亮
@@ -391,6 +424,12 @@ function resetSimulator() {
 
     // 重置按钮状态
     updateButtonStates(false);
+
+    // 将代码列表滚动到顶部
+    const instructionsList = document.getElementById('instructions-list');
+    if (instructionsList) {
+        instructionsList.scrollTop = 0;
+    }
 }
 
 // 更新按钮状态
@@ -566,15 +605,22 @@ function updateRegistersDisplay(registerOperations = new Map()) {
     document.getElementById('df').textContent = cpu.getFlag('df');
     document.getElementById('of').textContent = cpu.getFlag('of');
     
-    // 存储当前值作为下一次的比较基准
-    previousRegisterValues = currentValues;
+    // 存储当前值作为下一次的比较基准（只在执行指令后更新）
+    if (registerOperations.size > 0) {
+        previousRegisterValues = currentValues;
+    }
 }
 
 // 更新单个寄存器显示
 function updateRegisterDisplay(id, value, suffix, padding, registerOperations = new Map()) {
     const element = document.getElementById(id);
+    if (!element) {
+        console.error(`Element with id "${id}" not found`);
+        return;
+    }
+
     let registerNameElement = null;
-    
+
     // 查找前面的寄存器名称元素
     let sibling = element.previousElementSibling;
     while (sibling) {
@@ -584,29 +630,26 @@ function updateRegisterDisplay(id, value, suffix, padding, registerOperations = 
         }
         sibling = sibling.previousElementSibling;
     }
-    
-    // 检查是否有写入操作（从registerOperations或previousRegisterValues）
+
+    // 检查是否有写入操作（只从registerOperations中检查）
     let hasChanged = false;
-    
-    // 优先从registerOperations中检查（如果提供了）
+
+    // 只从registerOperations中检查写入操作
     if (registerOperations.has(id)) {
         const operation = registerOperations.get(id);
         hasChanged = operation.type === 'write' && operation.oldValue !== undefined;
-    } else {
-        // 否则使用previousRegisterValues
-        hasChanged = previousRegisterValues[id] !== undefined && previousRegisterValues[id] !== value;
     }
-    
+
     // 更新文本内容（HTML中已硬编码H后缀）
     element.textContent = value.toString(16).toUpperCase().padStart(padding, '0') + suffix;
-    
+
     // 添加或移除高亮
     if (hasChanged) {
         element.classList.add('register-changed');
     } else {
         element.classList.remove('register-changed');
     }
-    
+
     // 添加或移除changed类到寄存器名称元素
     if (registerNameElement) {
         if (hasChanged) {
@@ -648,11 +691,68 @@ function updateMemoryDisplay(offsetAddress) {
 
     // 根据当前选中的段寄存器计算实际内存地址
     const segmentValue = cpu.getSegmentRegister(currentMemorySegment);
-    const startAddress = (segmentValue << 4) + offsetAddress;
+    const segmentBase = segmentValue << 4;
 
-    const memoryDump = memory.getMemoryDump(startAddress, 256); // 显示256字节
+    // 堆栈段特殊处理：从高地址向低地址显示
+    let startAddress, memoryRows;
+    if (currentMemorySegment === 'ss') {
+        // 第一次显示堆栈段时，计算并固定显示的起始地址
+        if (stackDisplayBase === null) {
+            // 显示从 0xFF00 开始，共256字节（从高到低）
+            // 这样可以看到栈的使用情况，地址固定不会变化
+            stackDisplayBase = segmentBase + 0xFF00;
+        }
+        startAddress = stackDisplayBase;
 
+        // 获取原始内存数据
+        const memoryDump = memory.getMemoryDump(startAddress, 256);
+
+        // 创建倒序的内存行（从高地址到低地址）
+        memoryRows = [];
+        for (let rowIdx = memoryDump.length - 1; rowIdx >= 0; rowIdx--) {
+            memoryRows.push(memoryDump[rowIdx]);
+        }
+    } else {
+        // 其他段：正常从低地址到高地址显示
+        startAddress = (segmentBase) + offsetAddress;
+        memoryRows = memory.getMemoryDump(startAddress, 256);
+        // 重置堆栈显示基址（切换到其他段后再切回来时重新计算）
+        stackDisplayBase = null;
+    }
+
+    // 创建表头和内存内容的容器结构
     memoryGrid.innerHTML = '';
+
+    // 创建表头容器（固定）
+    const headerContainer = document.createElement('div');
+    headerContainer.className = 'memory-header-container';
+    headerContainer.innerHTML = `
+        <div class="memory-address">地址</div>
+        <div class="memory-bytes">
+            <div class="memory-byte header">0</div>
+            <div class="memory-byte header">1</div>
+            <div class="memory-byte header">2</div>
+            <div class="memory-byte header">3</div>
+            <div class="memory-byte header">4</div>
+            <div class="memory-byte header">5</div>
+            <div class="memory-byte header">6</div>
+            <div class="memory-byte header">7</div>
+            <div class="memory-byte header">8</div>
+            <div class="memory-byte header">9</div>
+            <div class="memory-byte header">A</div>
+            <div class="memory-byte header">B</div>
+            <div class="memory-byte header">C</div>
+            <div class="memory-byte header">D</div>
+            <div class="memory-byte header">E</div>
+            <div class="memory-byte header">F</div>
+        </div>
+        <div class="memory-ascii">ASCII</div>
+    `;
+    memoryGrid.appendChild(headerContainer);
+
+    // 创建内存内容容器（可滚动）
+    const bodyContainer = document.createElement('div');
+    bodyContainer.className = 'memory-body-container';
 
     // 在CS段时，找到当前指令并确定需要高亮的地址范围
     let currentInstructionAddresses = []; // 存储当前指令的所有物理地址
@@ -673,7 +773,7 @@ function updateMemoryDisplay(offsetAddress) {
         }
     }
 
-    memoryDump.forEach(row => {
+    memoryRows.forEach(row => {
         const rowElement = document.createElement('div');
         rowElement.className = 'memory-row';
 
@@ -721,8 +821,10 @@ function updateMemoryDisplay(offsetAddress) {
         rowElement.appendChild(bytesElement);
         rowElement.appendChild(asciiElement);
 
-        memoryGrid.appendChild(rowElement);
+        bodyContainer.appendChild(rowElement);
     });
+
+    memoryGrid.appendChild(bodyContainer);
 }
 
 // 更新指令列表显示
@@ -804,6 +906,28 @@ function updateInstructionsDisplay() {
 
         instructionsList.appendChild(rowElement);
     });
+    
+    // 自动滚动到当前指令行
+    const currentInstructionRow = instructionsList.querySelector('.instructions-table-row.current');
+    if (currentInstructionRow) {
+        // 获取所有指令行元素
+        const allInstructionRows = instructionsList.querySelectorAll('.instructions-table-row');
+        
+        // 获取当前行在所有行中的索引
+        const currentIndex = Array.from(allInstructionRows).indexOf(currentInstructionRow);
+        
+        // 假设有11行可见，如果当前行在后半部分（第6行及之后），则滚动到中间
+        const visibleLines = 11;
+        const middleLineIndex = Math.floor(visibleLines / 2);
+        
+        // 如果当前行索引大于中间行索引，则滚动到中间
+        if (currentIndex >= middleLineIndex) {
+            const rowHeight = currentInstructionRow.offsetHeight;
+            // 计算滚动到使当前行在中间的位置
+            const scrollTo = (currentIndex - middleLineIndex) * rowHeight;
+            instructionsList.scrollTop = scrollTo;
+        }
+    }
 }
 
 // 页面加载完成后初始化
