@@ -133,17 +133,23 @@
             <!-- 底部左侧：内存和显示控制面板 -->
             <div class="bottom-left-panel">
                 <div class="memory-panel">
-                    <h2>内存和显示控制</h2>
-                    
-                    <!-- 内存段和显示控制选择tab -->
+                    <div class="memory-panel-header">
+                        <h2>内存和用户界面</h2>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="clear-memory-on-load" checked>
+                            初始化内存
+                        </label>
+                    </div>
+
+                    <!-- 内存段和用户界面选择tab -->
                     <div class="memory-tabs">
                         <button class="memory-tab active" data-segment="cs">代码段 (CS)</button>
                         <button class="memory-tab" data-segment="ds">数据段 (DS)</button>
                         <button class="memory-tab" data-segment="ss">堆栈段 (SS)</button>
                         <button class="memory-tab" data-segment="es">附加段 (ES)</button>
-                        <button class="memory-tab" data-segment="display">显示控制</button>
+                        <button class="memory-tab" data-segment="display">用户界面</button>
                     </div>
-                    
+
                     <div class="memory-controls">
                         <input type="text" id="memory-address-input" placeholder="偏移地址 (例如: 0x1000)">
                         <button id="memory-go-btn">前往</button>
@@ -193,6 +199,7 @@
     <script src="memory.js"></script>
     <script src="cpu.js"></script>
     <script src="assembler.js"></script>
+    <script src="ui.js"></script>
     <script src="script.js"></script>
 </body>
 </html>

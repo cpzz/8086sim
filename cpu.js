@@ -40,16 +40,22 @@ class CPU8086 {
         
         // 断点
         this.breakpoints = new Set();
-        
+
         // 运行状态
         this.running = false;
         this.currentInstruction = null;
-        
+
         // 内存操作跟踪
         this.memoryOperations = new Map(); // 地址 -> {type: 'read'|'write', value: number}
-        
+
         // 寄存器操作跟踪
         this.registerOperations = new Map(); // 寄存器名称 -> {type: 'read'|'write', value: number}
+
+        // 显示输出缓冲区
+        this.outputBuffer = '';
+
+        // 更新显示控制的回调函数
+        this.updateOutputDisplay = null;
     }
     
     // 获取寄存器值（16位）
@@ -505,12 +511,16 @@ class CPU8086 {
                     } else if (rm8b === 3) {
                         address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('di'));
                     } else if (rm8b === 4) {
+                        // [SI]
                         address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('si'));
                     } else if (rm8b === 5) {
+                        // [DI]
                         address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('di'));
                     } else if (rm8b === 6) {
+                        // [BP]
                         address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp'));
                     } else if (rm8b === 7) {
+                        // [BX]
                         address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx'));
                     }
 
@@ -519,6 +529,79 @@ class CPU8086 {
                         instructionLength = 2;
                     } else {
                         console.error(`执行错误: 不支持的寻址模式 0x${modrm8b.toString(16)}`);
+                        this.running = false;
+                        return false;
+                    }
+                }
+                break;
+            case 0x8a: // MOV Gb, Eb (Gb是目标，Eb是源) - 8位版本
+                const modrm8a = this.readMemory8(currentAddress + 1);
+                const reg8a = (modrm8a >> 3) & 0x7;
+                const rm8a = modrm8a & 0x7;
+                const mod8a = (modrm8a >> 6) & 0x3;
+
+                // 目标8位寄存器映射 (reg字段) - 0=AL, 1=CL, 2=DL, 3=BL, 4=AH, 5=CH, 6=DH, 7=BH
+                const regToName8 = ['ax', 'cx', 'dx', 'bx', 'ax', 'cx', 'dx', 'bx'];
+                const isHighByte = [false, false, false, false, true, true, true, true]; // 是否操作高字节
+
+                if (mod8a === 3) {
+                    // 寄存器到寄存器传送 (8位)
+                    const srcRegToName8 = ['ax', 'cx', 'dx', 'bx', 'ax', 'cx', 'dx', 'bx'];
+                    const srcIsHighByte = [false, false, false, false, true, true, true, true];
+
+                    const srcReg = srcRegToName8[rm8a];
+                    const srcValue = this.getRegister(srcReg);
+                    const srcByteValue = srcIsHighByte[rm8a] ? (srcValue >> 8) & 0xff : srcValue & 0xff;
+
+                    const dstReg = regToName8[reg8a];
+                    const dstValue = this.getRegister(dstReg);
+
+                    if (isHighByte[reg8a]) {
+                        this.setRegister(dstReg, (dstValue & 0x00ff) | (srcByteValue << 8));
+                    } else {
+                        this.setRegister(dstReg, (dstValue & 0xff00) | srcByteValue);
+                    }
+                    instructionLength = 2;
+                } else {
+                    // 内存到寄存器传送 (8位)
+                    let address = null;
+
+                    // 根据 r/m 字段确定寻址方式
+                    if (rm8a === 0) {
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + this.getRegister('si'));
+                    } else if (rm8a === 1) {
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + this.getRegister('di'));
+                    } else if (rm8a === 2) {
+                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('si'));
+                    } else if (rm8a === 3) {
+                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('di'));
+                    } else if (rm8a === 4) {
+                        // [SI]
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('si'));
+                    } else if (rm8a === 5) {
+                        // [DI]
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('di'));
+                    } else if (rm8a === 6) {
+                        // [BP]
+                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp'));
+                    } else if (rm8a === 7) {
+                        // [BX]
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx'));
+                    }
+
+                    if (address !== null) {
+                        const byteValue = this.readMemory8(address);
+                        const dstReg = regToName8[reg8a];
+                        const dstValue = this.getRegister(dstReg);
+
+                        if (isHighByte[reg8a]) {
+                            this.setRegister(dstReg, (dstValue & 0x00ff) | (byteValue << 8));
+                        } else {
+                            this.setRegister(dstReg, (dstValue & 0xff00) | byteValue);
+                        }
+                        instructionLength = 2;
+                    } else {
+                        console.error(`执行错误: 不支持的寻址模式 0x${modrm8a.toString(16)}`);
                         this.running = false;
                         return false;
                     }
@@ -575,6 +658,54 @@ class CPU8086 {
                     }
                 }
                 break;
+            case 0xb0: // MOV AL, imm8
+                const imm8al = this.readMemory8(currentAddress + 1);
+                const currentAx = this.getRegister('ax');
+                this.setRegister('ax', (currentAx & 0xff00) | imm8al);
+                instructionLength = 2;
+                break;
+            case 0xb1: // MOV CL, imm8
+                const imm8cl = this.readMemory8(currentAddress + 1);
+                const currentCx = this.getRegister('cx');
+                this.setRegister('cx', (currentCx & 0xff00) | imm8cl);
+                instructionLength = 2;
+                break;
+            case 0xb2: // MOV DL, imm8
+                const imm8dl = this.readMemory8(currentAddress + 1);
+                const currentDx = this.getRegister('dx');
+                this.setRegister('dx', (currentDx & 0xff00) | imm8dl);
+                instructionLength = 2;
+                break;
+            case 0xb3: // MOV BL, imm8
+                const imm8bl = this.readMemory8(currentAddress + 1);
+                const currentBx = this.getRegister('bx');
+                this.setRegister('bx', (currentBx & 0xff00) | imm8bl);
+                instructionLength = 2;
+                break;
+            case 0xb4: // MOV AH, imm8
+                const imm8ah = this.readMemory8(currentAddress + 1);
+                const currentAh = this.getRegister('ax');
+                this.setRegister('ax', (currentAh & 0x00ff) | (imm8ah << 8));
+                instructionLength = 2;
+                break;
+            case 0xb5: // MOV CH, imm8
+                const imm8ch = this.readMemory8(currentAddress + 1);
+                const currentCh = this.getRegister('cx');
+                this.setRegister('cx', (currentCh & 0x00ff) | (imm8ch << 8));
+                instructionLength = 2;
+                break;
+            case 0xb6: // MOV DH, imm8
+                const imm8dh = this.readMemory8(currentAddress + 1);
+                const currentDh = this.getRegister('dx');
+                this.setRegister('dx', (currentDh & 0x00ff) | (imm8dh << 8));
+                instructionLength = 2;
+                break;
+            case 0xb7: // MOV BH, imm8
+                const imm8bh = this.readMemory8(currentAddress + 1);
+                const currentBh = this.getRegister('bx');
+                this.setRegister('bx', (currentBh & 0x00ff) | (imm8bh << 8));
+                instructionLength = 2;
+                break;
             case 0xb8: // MOV AX, imm16
                 const imm16ax = this.readMemory16(currentAddress + 1);
                 this.setRegister('ax', imm16ax);
@@ -615,6 +746,7 @@ class CPU8086 {
                     // 保持SP为初始值，符合DOS行为
                     // 设置IP为0xffff，表明无法继续执行
                     this.setRegister('ip', 0xffff);
+                    return false; // 没有返回地址，停止执行
                 } else {
                     // 正常情况，从堆栈弹出返回地址
                     const returnAddress = this.readMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), currentSP));
@@ -622,7 +754,73 @@ class CPU8086 {
                     this.setRegister('ip', returnAddress);
                 }
                 // 对于RET指令，不需要再增加IP，因为已经设置了returnAddress
-                return false;
+                instructionLength = 0;
+                break;
+            case 0xcd: // INT imm8
+                const interruptNum = this.readMemory8(currentAddress + 1);
+                // 简单处理：INT 21h 用于 DOS 功能调用
+                if (interruptNum === 0x21) {
+                    const ah = (this.getRegister('ax') >> 8) & 0xff;
+                    if (ah === 0x02) {
+                        // DOS 功能 02h：显示字符（DL）
+                        const dl = this.getRegister('dx') & 0xff;
+                        const char = String.fromCharCode(dl);
+                        console.log('INT 21h/02h: 输出字符: ' + char);
+                        // 将字符添加到输出缓冲区
+                        this.outputBuffer += char;
+                        // 调用更新显示的回调函数
+                        if (this.updateOutputDisplay) {
+                            this.updateOutputDisplay();
+                        }
+                    } else if (ah === 0x09) {
+                        // DOS 功能 09h：显示字符串（DS:DX）
+                        const ds = this.getSegmentRegister('ds');
+                        const dx = this.getRegister('dx');
+                        const stringAddress = (ds << 4) + dx;
+                        let char = this.readMemory8(stringAddress);
+                        while (char !== 0x24) { // 0x24 是 '$' 结束符
+                            this.outputBuffer += String.fromCharCode(char);
+                            char = this.readMemory8((ds << 4) + (++dx));
+                        }
+                        // 调用更新显示的回调函数
+                        if (this.updateOutputDisplay) {
+                            this.updateOutputDisplay();
+                        }
+                    } else if (ah === 0x4c) {
+                        // DOS 功能 4Ch：程序结束
+                        console.log('INT 21h/4Ch: 程序结束');
+                        this.running = false;
+                        return false;
+                    }
+                }
+                instructionLength = 2;
+                break;
+            case 0x40: // INC AX
+            case 0x41: // INC CX
+            case 0x42: // INC DX
+            case 0x43: // INC BX
+            case 0x44: // INC SP
+            case 0x45: // INC BP
+            case 0x46: // INC SI
+            case 0x47: // INC DI
+                const regInc = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'][opcode - 0x40];
+                const valueInc = this.registers[regInc];
+                this.setRegister(regInc, (valueInc + 1) & 0xffff);
+                instructionLength = 1;
+                break;
+            case 0x48: // DEC AX
+            case 0x49: // DEC CX
+            case 0x4a: // DEC DX
+            case 0x4b: // DEC BX
+            case 0x4c: // DEC SP
+            case 0x4d: // DEC BP
+            case 0x4e: // DEC SI
+            case 0x4f: // DEC DI
+                const regDec = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'][opcode - 0x48];
+                const valueDec = this.registers[regDec];
+                this.setRegister(regDec, (valueDec - 1) & 0xffff);
+                instructionLength = 1;
+                break;
             case 0xd0: // SHL/SHR r/m8, 1
                 const modrm8 = this.readMemory8(currentAddress + 1);
                 const reg8 = (modrm8 >> 3) & 0x7; // 4=SHL, 5=SHR
@@ -772,6 +970,20 @@ class CPU8086 {
                 this.setRegister('sp', this.getRegister('sp') + 2);
                 instructionLength = 1;
                 break;
+            case 0xE8: // CALL rel16 (近调用)
+                const offset16 = this.readMemory16(currentAddress + 1);
+                // 符号扩展
+                const signedOffsetCall = offset16 > 0x7fff ? offset16 - 0x10000 : offset16;
+                // 压入返回地址（下一条指令的地址）
+                this.setRegister('sp', this.getRegister('sp') - 2);
+                const returnAddr = this.ip + 3; // CALL指令长度为3字节
+                const stackAddr = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
+                this.writeMemory16(stackAddr, returnAddr);
+                // 跳转到目标地址：当前IP + 指令长度 + 偏移量
+                this.ip = this.ip + 3 + signedOffsetCall;
+                this.ip &= 0xffff;
+                instructionLength = 0; // 不增加IP，因为已经手动设置了
+                break;
             case 0x3c: // CMP AL, Ib
                 const imm8cmp = this.readMemory8(currentAddress + 1);
                 const alcmp = this.getRegister('ax') & 0xff;
@@ -796,6 +1008,18 @@ class CPU8086 {
                 const signedOperand2 = imm8cmp > 0x7f ? imm8cmp - 0x100 : imm8cmp;
                 this.flags.of = (signedResult !== signedOperand1 - signedOperand2) ? 1 : 0;
                 instructionLength = 2;
+                break;
+            case 0x75: // JNZ/JNE short
+                const offset75 = this.readMemory8(currentAddress + 1);
+                const signedOffset75 = offset75 > 0x7f ? offset75 - 0x100 : offset75;
+                if (!this.flags.zf) {
+                    // ZF=0 时跳转
+                    this.ip = this.ip + 2 + signedOffset75;
+                    this.ip &= 0xffff;
+                    instructionLength = 0;
+                } else {
+                    instructionLength = 2;
+                }
                 break;
             case 0x3d: // CMP AX, Iv
                 const imm16cmp = this.readMemory16(currentAddress + 1);
@@ -850,7 +1074,8 @@ class CPU8086 {
                 const offset8 = this.readMemory8(currentAddress + 1);
                 // 符号扩展
                 const signedOffset = offset8 > 0x7f ? offset8 - 0x100 : offset8;
-                this.ip += (signedOffset + 2); // +2 是因为指令长度为2
+                // 跳转到目标地址：当前IP + 指令长度 + 偏移量
+                this.ip = this.ip + 2 + signedOffset;
                 this.ip &= 0xffff;
                 instructionLength = 0; // 不增加IP，因为已经手动设置了
                 break;
@@ -859,7 +1084,8 @@ class CPU8086 {
                 if (this.flags.zf === 1) {
                     // 符号扩展
                     const signedOffsetJz = offset8jz > 0x7f ? offset8jz - 0x100 : offset8jz;
-                    this.ip += (signedOffsetJz + 2); // +2 是因为指令长度为2
+                    // 跳转到目标地址：当前IP + 指令长度 + 偏移量
+                    this.ip = this.ip + 2 + signedOffsetJz;
                     this.ip &= 0xffff;
                     instructionLength = 0; // 不增加IP，因为已经手动设置了
                 } else {
@@ -927,15 +1153,59 @@ class CPU8086 {
                     return false;
                 }
                 break;
+            case 0x8c: // MOV r/m16, Sreg (从段寄存器到通用寄存器/内存)
+                const modrm8c = this.readMemory8(currentAddress + 1);
+                const reg8c = (modrm8c >> 3) & 0x7; // 段寄存器：0=ES, 1=CS, 2=SS, 3=DS
+                const rm8c = modrm8c & 0x7;
+                const mod8c = (modrm8c >> 6) & 0x3;
+
+                // 段寄存器映射
+                const sregToName = ['es', 'cs', 'ss', 'ds'];
+                const srcSegment = sregToName[reg8c];
+                const segmentValue = this.getSegmentRegister(srcSegment);
+
+                if (mod8c === 3) {
+                    // 寄存器到寄存器传送
+                    const dstReg = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'][rm8c];
+                    this.setRegister(dstReg, segmentValue);
+                    instructionLength = 2;
+                } else {
+                    console.error(`执行错误: MOV Sreg 不支持的内存寻址模式`);
+                    this.running = false;
+                    return false;
+                }
+                break;
+            case 0x8e: // MOV Sreg, r/m16 (从通用寄存器/内存到段寄存器)
+                const modrm8e = this.readMemory8(currentAddress + 1);
+                const reg8e = (modrm8e >> 3) & 0x7; // 段寄存器：0=ES, 1=CS, 2=SS, 3=DS
+                const rm8e = modrm8e & 0x7;
+                const mod8e = (modrm8e >> 6) & 0x3;
+
+                // 段寄存器映射
+                const sregToName8e = ['es', 'cs', 'ss', 'ds'];
+                const dstSegment = sregToName8e[reg8e];
+
+                if (mod8e === 3) {
+                    // 寄存器到寄存器传送
+                    const srcReg = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'][rm8e];
+                    const srcValue = this.getRegister(srcReg);
+                    this.setSegmentRegister(dstSegment, srcValue);
+                    instructionLength = 2;
+                } else {
+                    console.error(`执行错误: MOV Sreg 不支持的内存寻址模式`);
+                    this.running = false;
+                    return false;
+                }
+                break;
             default:
                 // 所有未实现的指令都报非法指令错误
                 console.error(`执行错误: 遇到非法指令 0x${opcode.toString(16).padStart(2, '0')}`);
                 this.running = false;
                 return false;
         }
-        
-        // 更新指令指针（RET指令已经设置了IP，不需要再增加）
-        if (opcode !== 0xc3) { // 0xc3是RET指令的操作码
+
+        // 更新指令指针（RET、CALL、JMP指令已经设置了IP，不需要再增加）
+        if (opcode !== 0xc3 && opcode !== 0xE8 && opcode !== 0xeb) { // 0xc3=RET, 0xE8=CALL, 0xeb=JMP short
             this.ip += instructionLength;
             this.ip &= 0xffff; // 确保16位
         }

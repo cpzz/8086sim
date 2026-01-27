@@ -17,10 +17,13 @@ function initSimulator() {
     memory = new Memory();
     cpu = new CPU8086(memory);
     assembler = new Assembler(memory);
-    
+
+    // 设置CPU的显示输出更新回调
+    cpu.updateOutputDisplay = updateDisplayOutput;
+
     // 初始化UI
     initUI();
-    
+
     // 更新显示
     updateRegistersDisplay();
     updateMemoryDisplay(0x0000);
@@ -127,7 +130,14 @@ function handleFileLoad(e) {
     if (file) {
         assembler.loadFromFile(file).then((parsedInstructions) => {
             instructions = parsedInstructions;
-            
+
+            // 检查是否需要清空内存
+            const clearMemoryCheckbox = document.getElementById('clear-memory-on-load');
+            if (clearMemoryCheckbox && clearMemoryCheckbox.checked) {
+                // 清空所有段内存
+                clearAllMemory();
+            }
+
             // 重置状态变量
             hasExecuted = false;
             isAtEnd = false;
@@ -143,23 +153,50 @@ function handleFileLoad(e) {
                 cpu.ip = instructions[0].address;
                 updateStatusIndicator('已加载文件');
             }
-            
+
             // 初始化不同段的内存值
             initializeSegmentMemory();
-            
+
             updateInstructionsDisplay();
             updateRegistersDisplay();
             updateMemoryDisplay(0x0000);
-            
+
             // 清除寄存器和内存操作跟踪
             cpu.clearRegisterOperations();
             cpu.clearMemoryOperations();
-            
+
             // 更新按钮状态
             updateButtonStates(false);
         }).catch((error) => {
             alert('文件加载失败: ' + error.message);
         });
+    }
+}
+
+// 清空所有段内存
+function clearAllMemory() {
+    // 清空代码段
+    const csBase = cpu.getSegmentRegister('cs') << 4;
+    for (let i = 0; i < 65536; i++) {
+        memory.write8(csBase + i, 0);
+    }
+
+    // 清空数据段
+    const dsBase = cpu.getSegmentRegister('ds') << 4;
+    for (let i = 0; i < 65536; i++) {
+        memory.write8(dsBase + i, 0);
+    }
+
+    // 清空堆栈段
+    const ssBase = cpu.getSegmentRegister('ss') << 4;
+    for (let i = 0; i < 65536; i++) {
+        memory.write8(ssBase + i, 0);
+    }
+
+    // 清空附加段
+    const esBase = cpu.getSegmentRegister('es') << 4;
+    for (let i = 0; i < 65536; i++) {
+        memory.write8(esBase + i, 0);
     }
 }
 
@@ -182,8 +219,18 @@ function initializeSegmentMemory() {
         memory.write8(csBase + i, 0);
     }
 
-    // 数据段 (DS) 初始化 - 保持随机数据
-    // 堆栈段 (SS) 初始化 - 保持随机数据，但将栈顶的 FFFF 和 FFFE 设置为 0
+    // 数据段 (DS) 初始化 - 将汇编器收集的数据定义写入DS段
+    const dsBase = cpu.getSegmentRegister('ds') << 4;
+    if (assembler.dataSegments && assembler.dataSegments.length > 0) {
+        // 将数据定义复制到DS段
+        for (const dataSegment of assembler.dataSegments) {
+            for (let j = 0; j < dataSegment.data.length; j++) {
+                memory.write8(dsBase + dataSegment.offset + j, dataSegment.data[j]);
+            }
+        }
+    }
+
+    // 堆栈段 (SS) 初始化 - 如果不清空内存，保持随机数据，但将栈顶的 FFFF 和 FFFE 设置为 0
     const ssBase = cpu.getSegmentRegister('ss') << 4;
     memory.write8(ssBase + 0xFFFE, 0);
     memory.write8(ssBase + 0xFFFF, 0);
@@ -666,26 +713,7 @@ function updateMemoryDisplay(offsetAddress) {
 
     // 检查是否是显示控制tab
     if (currentMemorySegment === 'display') {
-        // 显示显示控制界面
-        memoryGrid.innerHTML = `
-            <div class="display-simulator">
-                <div class="display-header">
-                    <h3>8086显示指令输出</h3>
-                </div>
-                <div class="display-content">
-                    <div class="display-grid">
-                        <!-- 显示内容将在这里显示 -->
-                        <div class="display-message">8086显示指令的输出结果将显示在这里</div>
-                        <div class="display-example">
-                            <p>示例：MOV AH, 02h</p>
-                            <p>        MOV DL, 41h</p>
-                            <p>        INT 21h</p>
-                            <p>; 这将在显示控制中显示字母 'A'</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        `;
+        renderDisplayControl(memoryGrid);
         return;
     }
 
