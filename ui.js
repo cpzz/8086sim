@@ -2,8 +2,8 @@
 // 更新UI显示输出
 function updateDisplayOutput() {
     // 如果当前正好在用户界面tab，则更新显示
-    if (currentMemorySegment === 'display') {
-        updateMemoryDisplay(0x0000);
+    if (currentLeftTab === 'ui') {
+        updateUIDisplay();
     }
 }
 
@@ -14,14 +14,14 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// 渲染用户界面控制界面 - DOS 80x25 文本模式
+// 渲染用户界面控制界面 - DOS 80x40 文本模式
 function renderDisplayControl(memoryGrid) {
     const outputText = cpu.outputBuffer || '';
     const hasOutput = outputText.length > 0;
 
-    // DOS 标准 80x25 文本模式
+    // DOS 标准 80x40 文本模式
     const COLS = 80;
-    const ROWS = 25;
+    const ROWS = 40;
 
     // 初始化显示缓冲区
     let displayLines = [];
@@ -29,7 +29,7 @@ function renderDisplayControl(memoryGrid) {
     let cursorCol = 0;
 
     if (hasOutput) {
-        // 初始化25行，每行80个空格
+        // 初始化40行，每行80个空格
         for (let i = 0; i < ROWS; i++) {
             displayLines.push(' '.repeat(COLS));
         }
@@ -73,7 +73,7 @@ function renderDisplayControl(memoryGrid) {
             }
         }
     } else {
-        // 初始状态，25行空行
+        // 初始状态，40行空行
         for (let i = 0; i < ROWS; i++) {
             displayLines.push(' '.repeat(COLS));
         }

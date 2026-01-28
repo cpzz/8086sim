@@ -21,6 +21,95 @@ body {
     box-sizing: border-box;
 }
 
+.main-content {
+    display: flex;
+    gap: 20px;
+    flex: 1;
+    min-height: 0;
+    margin-top: 20px;
+}
+
+.left-panel {
+    flex: 1;
+    min-width: 500px;
+    display: flex;
+    flex-direction: column;
+}
+
+.right-panel {
+    flex: 1;
+    min-width: 500px;
+}
+
+.left-tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+    border-bottom: 2px solid #007bff;
+}
+
+.left-tab {
+    padding: 10px 20px;
+    background-color: #f8f9fa;
+    border: none;
+    border-radius: 8px 8px 0 0;
+    cursor: pointer;
+    font-weight: 500;
+    color: #495057;
+    transition: all 0.2s ease;
+}
+
+.left-tab:hover {
+    background-color: #e9ecef;
+}
+
+.left-tab.active {
+    background-color: #007bff;
+    color: white;
+}
+
+.left-tab-content {
+    display: none;
+    flex: 1;
+    overflow: auto;
+}
+
+.left-tab-content.active {
+    display: flex;
+    flex-direction: column;
+}
+
+.ui-display-grid {
+    background-color: #000;
+    color: #00ff00;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    padding: 10px;
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+}
+
+.registers-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding: 10px;
+}
+
+.register-section {
+    background-color: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid #e9ecef;
+}
+
+.register-section h3 {
+    margin-bottom: 10px;
+    font-size: 14px;
+    color: #495057;
+    font-weight: 600;
+}
+
 body {
     margin: 0;
     padding: 0;
@@ -283,21 +372,7 @@ body {
     }
 }
 
-.bottom-container {
-    display: flex;
-    gap: 20px;
-    flex-wrap: wrap;
-}
-
-.bottom-left-panel {
-    flex: 1;
-    min-width: 400px;
-}
-
-.bottom-right-panel {
-    flex: 1;
-    min-width: 400px;
-}
+/* 移除旧的 bottom-container 相关样式，已由 main-content 代替 */
 
 .code-panel {
     display: flex;
@@ -593,7 +668,13 @@ table.register-table td.register-changed {
     border-bottom: 1px solid #dee2e6;
 }
 
-.memory-tab {
+.memory-segment-tabs {
+    display: flex;
+    margin-bottom: 15px;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.memory-tab, .memory-segment-tab {
     padding: 10px 20px;
     border: none;
     background-color: transparent;
@@ -605,12 +686,12 @@ table.register-table td.register-changed {
     color: #6c757d;
 }
 
-.memory-tab:hover {
+.memory-tab:hover, .memory-segment-tab:hover {
     background-color: #e9ecef;
     color: #495057;
 }
 
-.memory-tab.active {
+.memory-tab.active, .memory-segment-tab.active {
     background-color: white;
     color: #4CAF50;
     border-bottom: 3px solid #4CAF50;

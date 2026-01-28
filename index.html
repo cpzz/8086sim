@@ -9,29 +9,40 @@
 <body>
     <div class="container">
         <h1>8086 CPU 模拟器</h1>
-        
-        <!-- 顶部：寄存器面板 -->
-        <div class="top-panel">
-            <h2>寄存器</h2>
-            <div class="registers-layout">
-                <!-- 通用寄存器面板 -->
-                <div class="register-panel">
-                    <h3>通用寄存器</h3>
-                    <div class="registers-container">
+
+        <!-- 左侧面板：用户界面/寄存器/内存 -->
+        <div class="left-panel">
+            <div class="left-tabs">
+                <button class="left-tab active" data-tab="ui">用户界面</button>
+                <button class="left-tab" data-tab="registers">寄存器</button>
+                <button class="left-tab" data-tab="memory">内存</button>
+            </div>
+
+            <!-- 用户界面tab -->
+            <div class="left-tab-content active" data-content="ui">
+                <div class="display-panel">
+                    <div class="memory-panel-header">
+                        <h2>DOS 80x40 文本模式</h2>
+                    </div>
+                    <div id="ui-display-grid" class="ui-display-grid">
+                        <!-- 用户界面内容将在这里动态生成 -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- 寄存器tab -->
+            <div class="left-tab-content" data-content="registers">
+                <div class="registers-panel">
+                    <div class="register-section">
+                        <h3>通用寄存器</h3>
                         <table class="register-table general-registers">
                             <tr class="register-names">
-                                <td class="register-name general">AX</td>
-                                <td class="register-name general">AH</td>
-                                <td class="register-name general">AL</td>
-                                <td class="register-name general">BX</td>
-                                <td class="register-name general">BH</td>
-                                <td class="register-name general">BL</td>
-                                <td class="register-name general">CX</td>
-                                <td class="register-name general">CH</td>
-                                <td class="register-name general">CL</td>
-                                <td class="register-name general">DX</td>
-                                <td class="register-name general">DH</td>
-                                <td class="register-name general">DL</td>
+                                <td class="register-name">AX</td>
+                                <td class="register-name">AH</td>
+                                <td class="register-name">AL</td>
+                                <td class="register-name">BX</td>
+                                <td class="register-name">BH</td>
+                                <td class="register-name">BL</td>
                             </tr>
                             <tr class="register-values">
                                 <td id="ax">0000H</td>
@@ -40,6 +51,16 @@
                                 <td id="bx">0000H</td>
                                 <td id="bh">00H</td>
                                 <td id="bl">00H</td>
+                            </tr>
+                            <tr class="register-names">
+                                <td class="register-name">CX</td>
+                                <td class="register-name">CH</td>
+                                <td class="register-name">CL</td>
+                                <td class="register-name">DX</td>
+                                <td class="register-name">DH</td>
+                                <td class="register-name">DL</td>
+                            </tr>
+                            <tr class="register-values">
                                 <td id="cx">0000H</td>
                                 <td id="ch">00H</td>
                                 <td id="cl">00H</td>
@@ -49,19 +70,16 @@
                             </tr>
                         </table>
                     </div>
-                </div>
-                
-                <!-- 指针/索引寄存器面板 -->
-                <div class="register-panel">
-                    <h3>指针/索引寄存器</h3>
-                    <div class="registers-container">
+
+                    <div class="register-section">
+                        <h3>指针/索引寄存器</h3>
                         <table class="register-table pointer-index-registers">
                             <tr class="register-names">
-                                <td class="register-name index-pointer">SP</td>
-                                <td class="register-name index-pointer">BP</td>
-                                <td class="register-name instruction">IP</td>
-                                <td class="register-name index-pointer">SI</td>
-                                <td class="register-name index-pointer">DI</td>
+                                <td class="register-name">SP</td>
+                                <td class="register-name">BP</td>
+                                <td class="register-name">IP</td>
+                                <td class="register-name">SI</td>
+                                <td class="register-name">DI</td>
                             </tr>
                             <tr class="register-values">
                                 <td id="sp">0000H</td>
@@ -72,33 +90,9 @@
                             </tr>
                         </table>
                     </div>
-                </div>
-                
-                <!-- 段寄存器面板 -->
-                <div class="register-panel">
-                    <h3>段寄存器</h3>
-                    <div class="registers-container">
-                        <table class="register-table segment-registers">
-                            <tr class="register-names">
-                                <td class="register-name segment">CS</td>
-                                <td class="register-name segment">DS</td>
-                                <td class="register-name segment">SS</td>
-                                <td class="register-name segment">ES</td>
-                            </tr>
-                            <tr class="register-values">
-                                <td id="cs">0000H</td>
-                                <td id="ds">0000H</td>
-                                <td id="ss">0000H</td>
-                                <td id="es">0000H</td>
-                            </tr>
-                        </table>
-                    </div>
-                </div>
-                
-                <!-- 标记寄存器面板 -->
-                <div class="register-panel">
-                    <h3>标记寄存器</h3>
-                    <div class="registers-container">
+
+                    <div class="register-section">
+                        <h3>标记寄存器</h3>
                         <table class="register-table flags-table">
                             <tr class="register-names">
                                 <td class="flag-name">CF</td>
@@ -124,30 +118,44 @@
                             </tr>
                         </table>
                     </div>
+
+                    <div class="register-section">
+                        <h3>段寄存器</h3>
+                        <table class="register-table segment-registers">
+                            <tr class="register-names">
+                                <td class="register-name">CS</td>
+                                <td class="register-name">DS</td>
+                                <td class="register-name">SS</td>
+                                <td class="register-name">ES</td>
+                            </tr>
+                            <tr class="register-values">
+                                <td id="cs">0000H</td>
+                                <td id="ds">0000H</td>
+                                <td id="ss">0000H</td>
+                                <td id="es">0000H</td>
+                            </tr>
+                        </table>
+                    </div>
                 </div>
             </div>
-        </div>
-        
-        <!-- 底部容器 -->
-        <div class="bottom-container">
-            <!-- 底部左侧：内存和显示控制面板 -->
-            <div class="bottom-left-panel">
+
+            <!-- 内存tab -->
+            <div class="left-tab-content" data-content="memory">
                 <div class="memory-panel">
                     <div class="memory-panel-header">
-                        <h2>内存和用户界面</h2>
+                        <h2>内存</h2>
                         <label class="checkbox-label">
                             <input type="checkbox" id="clear-memory-on-load" checked>
                             初始化内存
                         </label>
                     </div>
 
-                    <!-- 内存段和用户界面选择tab -->
-                    <div class="memory-tabs">
-                        <button class="memory-tab active" data-segment="cs">代码段 (CS)</button>
-                        <button class="memory-tab" data-segment="ds">数据段 (DS)</button>
-                        <button class="memory-tab" data-segment="ss">堆栈段 (SS)</button>
-                        <button class="memory-tab" data-segment="es">附加段 (ES)</button>
-                        <button class="memory-tab" data-segment="display">用户界面</button>
+                    <!-- 内存段选择tab -->
+                    <div class="memory-segment-tabs">
+                        <button class="memory-segment-tab active" data-segment="cs">代码段 (CS)</button>
+                        <button class="memory-segment-tab" data-segment="ds">数据段 (DS)</button>
+                        <button class="memory-segment-tab" data-segment="ss">堆栈段 (SS)</button>
+                        <button class="memory-segment-tab" data-segment="es">附加段 (ES)</button>
                     </div>
 
                     <div class="memory-controls">
@@ -159,43 +167,43 @@
                     </div>
                 </div>
             </div>
-            
-            <!-- 底部右侧：代码面板 -->
-            <div class="bottom-right-panel">
-                <div class="code-panel">
-                    <!-- 顶部：标题和控制面板 -->
-                    <div class="code-control-header">
-                        <span class="header-item">代码</span>
-                        <span class="header-item status-indicator" id="status-indicator">[初始状态]</span>
-                        <div class="control-panel">
-                            <button id="load-btn">加载文件</button>
-                            <input type="file" id="file-input" accept=".asm" style="display: none;">
-                            <button id="step-btn">单步执行</button>
-                            <button id="run-btn">执行</button>
-                            <button id="pause-btn">暂停</button>
-                            <button id="reset-btn">重置</button>
-                        </div>
+        </div>
+
+        <!-- 右侧面板：代码 -->
+        <div class="right-panel">
+            <div class="code-panel">
+                <!-- 顶部：标题和控制面板 -->
+                <div class="code-control-header">
+                    <span class="header-item">代码</span>
+                    <span class="header-item status-indicator" id="status-indicator">[初始状态]</span>
+                    <div class="control-panel">
+                        <button id="load-btn">加载文件</button>
+                        <input type="file" id="file-input" accept=".asm" style="display: none;">
+                        <button id="step-btn">单步执行</button>
+                        <button id="run-btn">执行</button>
+                        <button id="pause-btn">暂停</button>
+                        <button id="reset-btn">重置</button>
                     </div>
-                    
-                    <!-- 代码表格 -->
-                    <div class="instructions-panel">
-                        <div class="instructions-table">
-                            <div class="instructions-table-header">
-                                <div class="instructions-table-cell address">偏移地址</div>
-                                <div class="instructions-table-cell machine-code">机器码</div>
-                                <div class="instructions-table-cell assembly">汇编指令</div>
-                                <div class="instructions-table-cell comment">注释</div>
-                            </div>
-                            <div id="instructions-list" class="instructions-table-body">
-                                <!-- 代码将在这里动态生成 -->
-                            </div>
+                </div>
+
+                <!-- 代码表格 -->
+                <div class="instructions-panel">
+                    <div class="instructions-table">
+                        <div class="instructions-table-header">
+                            <div class="instructions-table-cell address">偏移地址</div>
+                            <div class="instructions-table-cell machine-code">机器码</div>
+                            <div class="instructions-table-cell assembly">汇编指令</div>
+                            <div class="instructions-table-cell comment">注释</div>
+                        </div>
+                        <div id="instructions-list" class="instructions-table-body">
+                            <!-- 代码将在这里动态生成 -->
                         </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-    
+
     <script src="memory.js"></script>
     <script src="cpu.js"></script>
     <script src="assembler.js"></script>

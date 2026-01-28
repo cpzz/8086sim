@@ -5,6 +5,7 @@ let assembler;
 let instructions = [];
 let breakpoints = new Set();
 let currentMemorySegment = 'cs'; // 当前选中的内存段
+let currentLeftTab = 'ui'; // 当前选中的左侧tab: ui, registers, memory
 let previousRegisterValues = {}; // 存储上一次的寄存器值
 let hasExecuted = false; // 跟踪是否已经执行了指令
 let isAtEnd = false; // 跟踪是否执行到了最后一条指令
@@ -98,26 +99,49 @@ function initUI() {
             document.getElementById('memory-go-btn').click();
         }
     });
-    
-    // 内存tab页切换
-    const memoryTabs = document.querySelectorAll('.memory-tab');
-    memoryTabs.forEach(tab => {
+
+    // 左侧tab页切换（用户界面/寄存器/内存）
+    const leftTabs = document.querySelectorAll('.left-tab');
+    leftTabs.forEach(tab => {
         tab.addEventListener('click', () => {
             // 移除所有tab的active类
-            memoryTabs.forEach(t => t.classList.remove('active'));
+            leftTabs.forEach(t => t.classList.remove('active'));
+            // 添加当前tab的active类
+            tab.classList.add('active');
+            // 更新当前tab
+            currentLeftTab = tab.dataset.tab;
+
+            // 切换内容显示
+            document.querySelectorAll('.left-tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            const activeContent = document.querySelector(`.left-tab-content[data-content="${currentLeftTab}"]`);
+            if (activeContent) {
+                activeContent.classList.add('active');
+            }
+
+            // 更新显示
+            if (currentLeftTab === 'ui') {
+                updateUIDisplay();
+            } else if (currentLeftTab === 'registers') {
+                updateRegistersDisplay();
+            } else if (currentLeftTab === 'memory') {
+                updateMemoryDisplay(0x0000);
+            }
+        });
+    });
+
+    // 内存段tab页切换
+    const memorySegmentTabs = document.querySelectorAll('.memory-segment-tab');
+    memorySegmentTabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            // 移除所有tab的active类
+            memorySegmentTabs.forEach(t => t.classList.remove('active'));
             // 添加当前tab的active类
             tab.classList.add('active');
             // 更新当前内存段
             currentMemorySegment = tab.dataset.segment;
-            
-            // 显示或隐藏内存控制控件
-            const memoryControls = document.querySelector('.memory-controls');
-            if (currentMemorySegment === 'display') {
-                memoryControls.style.display = 'none';
-            } else {
-                memoryControls.style.display = 'flex';
-            }
-            
+
             // 更新内存显示
             updateMemoryDisplay(0x0000);
         });
@@ -707,15 +731,16 @@ function updateRegisterDisplay(id, value, suffix, padding, registerOperations = 
     }
 }
 
+// 更新UI显示
+function updateUIDisplay() {
+    const uiDisplayGrid = document.getElementById('ui-display-grid');
+    renderDisplayControl(uiDisplayGrid);
+}
+
 // 更新内存显示
 function updateMemoryDisplay(offsetAddress) {
     const memoryGrid = document.getElementById('memory-grid');
-
-    // 检查是否是显示控制tab
-    if (currentMemorySegment === 'display') {
-        renderDisplayControl(memoryGrid);
-        return;
-    }
+    // 不再需要检查 display 段，因为用户界面现在是独立的tab
 
     // 根据当前选中的段寄存器计算实际内存地址
     const segmentValue = cpu.getSegmentRegister(currentMemorySegment);
