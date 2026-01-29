@@ -14,14 +14,29 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// 渲染用户界面控制界面 - DOS 80x40 文本模式
+// 渲染用户界面控制界面 - DOS 80x25 文本模式
 function renderDisplayControl(memoryGrid) {
     const outputText = cpu.outputBuffer || '';
     const hasOutput = outputText.length > 0;
 
-    // DOS 标准 80x40 文本模式
+    // DOS 标准 80列
     const COLS = 80;
-    const ROWS = 40;
+    // 根据容器高度动态计算行数
+    const LINE_HEIGHT = 18; // 每行高度（包括line-height: 1.4）
+    const CONTENT_PADDING = 20; // display-content 的 padding: 10px * 2
+    let ROWS = 25; // 默认25行
+
+    // 尝试计算可用的行数
+    try {
+        const containerHeight = memoryGrid.clientHeight - CONTENT_PADDING;
+        if (containerHeight > 0) {
+            ROWS = Math.floor(containerHeight / LINE_HEIGHT);
+            ROWS = Math.max(10, Math.min(ROWS, 50)); // 限制在10-50行之间
+        }
+    } catch (e) {
+        // 如果计算失败，使用默认值
+        ROWS = 25;
+    }
 
     // 初始化显示缓冲区
     let displayLines = [];
@@ -29,7 +44,7 @@ function renderDisplayControl(memoryGrid) {
     let cursorCol = 0;
 
     if (hasOutput) {
-        // 初始化40行，每行80个空格
+        // 初始化空行
         for (let i = 0; i < ROWS; i++) {
             displayLines.push(' '.repeat(COLS));
         }
@@ -73,7 +88,7 @@ function renderDisplayControl(memoryGrid) {
             }
         }
     } else {
-        // 初始状态，40行空行
+        // 初始状态，空行
         for (let i = 0; i < ROWS; i++) {
             displayLines.push(' '.repeat(COLS));
         }

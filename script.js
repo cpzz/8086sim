@@ -26,6 +26,7 @@ function initSimulator() {
     initUI();
 
     // 更新显示
+    updateUIDisplay();
     updateRegistersDisplay();
     updateMemoryDisplay(0x0000);
     updateInstructionsDisplay();
@@ -155,12 +156,8 @@ function handleFileLoad(e) {
         assembler.loadFromFile(file).then((parsedInstructions) => {
             instructions = parsedInstructions;
 
-            // 检查是否需要清空内存
-            const clearMemoryCheckbox = document.getElementById('clear-memory-on-load');
-            if (clearMemoryCheckbox && clearMemoryCheckbox.checked) {
-                // 清空所有段内存
-                clearAllMemory();
-            }
+            // 清空所有段内存
+            clearAllMemory();
 
             // 重置状态变量
             hasExecuted = false;

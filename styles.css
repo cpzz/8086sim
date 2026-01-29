@@ -9,16 +9,19 @@ body {
     background-color: #f5f5f5;
     color: #333;
     line-height: 1.6;
+    overflow: hidden;
+    height: 100vh;
 }
 
 .container {
     width: 100%;
-    min-height: 100vh;
+    height: 100vh;
     margin: 0;
     padding: 20px;
     background-color: white;
-    box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
     box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
 }
 
 .main-content {
@@ -27,6 +30,7 @@ body {
     flex: 1;
     min-height: 0;
     margin-top: 20px;
+    overflow: hidden;
 }
 
 .left-panel {
@@ -34,11 +38,21 @@ body {
     min-width: 500px;
     display: flex;
     flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    background-color: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    padding: 15px;
 }
 
 .right-panel {
     flex: 1;
     min-width: 500px;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 .left-tabs {
@@ -71,6 +85,7 @@ body {
 .left-tab-content {
     display: none;
     flex: 1;
+    min-height: 0;
     overflow: auto;
 }
 
@@ -87,27 +102,68 @@ body {
     border-radius: 4px;
     overflow: hidden;
     position: relative;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 .registers-panel {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 12px;
     padding: 10px;
 }
 
 .register-section {
     background-color: #f8f9fa;
-    padding: 15px;
+    padding: 10px;
     border-radius: 8px;
     border: 1px solid #e9ecef;
 }
 
 .register-section h3 {
-    margin-bottom: 10px;
+    margin-bottom: 8px;
     font-size: 14px;
     color: #495057;
     font-weight: 600;
+}
+
+/* 通用寄存器两行布局 */
+.general-registers-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.general-register-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.general-register-group {
+    background-color: white;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 8px;
+}
+
+.general-register-group td {
+    padding: 6px 10px;
+}
+
+.general-register-group .register-name {
+    font-weight: 700 !important;
+    color: #2c3e50 !important;
+    text-align: center;
+    background-color: #f8f9fa;
+}
+
+.general-register-group td[id] {
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    text-align: center;
+    color: #495057;
 }
 
 body {
@@ -265,48 +321,48 @@ body {
     padding: 6px 8px;
 }
 
-/* 为寄存器值设置固定宽度 */
+/* 通用寄存器名字样式 */
 .general-registers .register-name {
-    width: 30px;
     text-align: center;
-    background-color: #f8f9fa;
+    background-color: #e9ecef;
     font-weight: 700;
     color: #2c3e50;
 }
 
-/* 4位十六进制值的固定宽度 */
-#ax, #bx, #cx, #dx {
-    width: 70px;
+/* 4位十六进制值的样式 */
+#ax, #bx, #cx, #dx, #sp, #bp, #ip, #si, #di, #cs, #ds, #ss, #es {
     text-align: center;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
 }
 
-/* 2位十六进制值的固定宽度 */
+/* 2位十六进制值的样式 */
 #ah, #al, #bh, #bl, #ch, #cl, #dh, #dl {
-    width: 50px;
     text-align: center;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
 }
 
-/* 其他寄存器值的固定宽度 */
-#sp, #bp, #ip, #si, #di, #cs, #ds, #ss, #es {
-    width: 70px;
-    text-align: center;
-    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-}
-
-/* 标志位值的固定宽度 */
+/* 标志位值的样式 */
 .flags-table td:not(.flag-name) {
-    width: 30px;
     text-align: center;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+/* 指针/索引寄存器布局 */
+.pointer-index-registers-grid {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.pointer-index-registers-row {
+    display: flex;
 }
 
 /* 指针/索引寄存器和段寄存器的名字样式 */
 .pointer-index-registers .register-name,
 .segment-registers .register-name {
     text-align: center;
-    background-color: #f8f9fa;
+    background-color: #e9ecef;
     font-weight: 700;
     color: #2c3e50;
 }
@@ -320,7 +376,7 @@ body {
 /* 标志位名字样式 */
 .flags-table .flag-name {
     text-align: center;
-    background-color: #f8f9fa;
+    background-color: #e9ecef;
     font-weight: 700;
     color: #2c3e50;
 }
@@ -357,7 +413,6 @@ body {
 .segment-registers td {
     padding: 8px 12px;
     white-space: nowrap;
-    width: auto;
 }
 
 /* 确保在小屏幕上的响应式布局 */
@@ -382,6 +437,8 @@ body {
     border-radius: 8px;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
     overflow: hidden;
+    flex: 1;
+    min-height: 0;
 }
 
 .code-panel .code-control-header {
@@ -396,6 +453,10 @@ body {
     box-shadow: none;
     padding: 0;
     margin: 0;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 .code-panel .instructions-table {
@@ -430,8 +491,8 @@ body {
     border-collapse: collapse;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 14px;
-    width: 100%;
-    margin-bottom: 15px;
+    width: auto;
+    margin-bottom: 0;
     table-layout: auto;
 }
 
@@ -446,9 +507,10 @@ body {
 
 .register-table td {
     text-align: left;
-    padding: 8px 12px;
+    padding: 6px 10px;
     border: 1px solid #dee2e6;
     transition: background-color 0.2s ease;
+    width: auto;
 }
 
 .register-table tr:hover {
@@ -457,7 +519,7 @@ body {
 
 /* 通用寄存器表格特殊样式 */
 .general-registers-container {
-    margin-bottom: 15px;
+    margin-bottom: 0;
 }
 
 .general-registers {
@@ -468,7 +530,6 @@ body {
 .general-registers td {
     padding: 6px 8px;
     white-space: nowrap;
-    min-width: 40px;
 }
 
 /* 隔行变色效果 */
@@ -499,7 +560,7 @@ body {
 .segment-registers,
 .flags-table {
     table-layout: auto;
-    width: 100%;
+    width: auto;
 }
 
 /* 寄存器名称行和值行的颜色标记 */
@@ -516,6 +577,14 @@ body {
     font-weight: 600;
     color: #2c3e50;
     font-size: 13px;
+}
+
+/* 通用寄存器组名字样式 - 覆盖通用样式 */
+.general-register-group .register-name {
+    font-weight: 700 !important;
+    color: #2c3e50 !important;
+    text-align: center;
+    background-color: #e9ecef;
 }
 
 /* 寄存器值变化时高亮显示 */
@@ -572,6 +641,9 @@ table.register-table td.register-changed {
     border-radius: 8px;
     border: 1px solid #e9ecef;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
 }
 
 .memory-panel h2 {
@@ -592,11 +664,12 @@ table.register-table td.register-changed {
     border-radius: 6px;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 14px;
-    max-height: 470px;
     display: flex;
     flex-direction: column;
     overflow-x: auto;
     background-color: white;
+    flex: 1;
+    min-height: 0;
 }
 
 .instructions-table-header {
@@ -767,12 +840,13 @@ table.register-table td.register-changed {
     padding: 0;
     border-radius: 6px;
     border: 1px solid #dee2e6;
-    max-height: 350px;
     overflow: hidden;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     font-size: 14px;
     display: flex;
     flex-direction: column;
+    flex: 1;
+    min-height: 0;
 }
 
 .memory-header-container {
@@ -786,8 +860,8 @@ table.register-table td.register-changed {
 }
 
 .memory-body-container {
-    overflow-y: auto;
     padding: 4px 12px;
+    overflow-y: auto;
     flex: 1;
 }
 
@@ -896,6 +970,8 @@ table.register-table td.register-changed {
     box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
     display: flex;
     flex-direction: column;
+    flex: 1;
+    min-height: 0;
 }
 
 .display-header {
@@ -921,6 +997,8 @@ table.register-table td.register-changed {
     overflow: hidden;
     min-height: 0;
     position: relative;
+    display: flex;
+    flex-direction: column;
 }
 
 .display-lines {
@@ -930,8 +1008,9 @@ table.register-table td.register-changed {
     color: #00ff00;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     line-height: 1.4;
-    height: 100%;
-    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
     position: relative;
 }
 
