@@ -19,24 +19,9 @@ function renderDisplayControl(memoryGrid) {
     const outputText = cpu.outputBuffer || '';
     const hasOutput = outputText.length > 0;
 
-    // DOS 标准 80列
+    // DOS 标准 80列x25行
     const COLS = 80;
-    // 根据容器高度动态计算行数
-    const LINE_HEIGHT = 18; // 每行高度（包括line-height: 1.4）
-    const CONTENT_PADDING = 20; // display-content 的 padding: 10px * 2
-    let ROWS = 25; // 默认25行
-
-    // 尝试计算可用的行数
-    try {
-        const containerHeight = memoryGrid.clientHeight - CONTENT_PADDING;
-        if (containerHeight > 0) {
-            ROWS = Math.floor(containerHeight / LINE_HEIGHT);
-            ROWS = Math.max(10, Math.min(ROWS, 50)); // 限制在10-50行之间
-        }
-    } catch (e) {
-        // 如果计算失败，使用默认值
-        ROWS = 25;
-    }
+    const ROWS = 25; // 固定25行
 
     // 初始化显示缓冲区
     let displayLines = [];

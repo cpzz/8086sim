@@ -178,6 +178,9 @@ class Assembler {
             case 'inc':
             case 'dec':
                 return 1;
+            case 'lea':
+                // LEA r16, m - 操作码1字节 + ModR/M 1字节 + 位移2字节（如果需要）
+                return 4;
             default:
                 return 2;
         }
@@ -989,6 +992,42 @@ class Assembler {
                     };
                 }
                 break;
+            case 'lea':
+                if (operands.length === 2) {
+                    const destReg = operands[0].toLowerCase();
+                    const srcOperand = operands[1];
+                    
+                    // 检查目标是否是16位寄存器
+                    const regMap = {
+                        'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
+                        'sp': 4, 'bp': 5, 'si': 6, 'di': 7
+                    };
+                    
+                    if (regMap.hasOwnProperty(destReg)) {
+                        // LEA r16, m
+                        // 操作码: 0x8D
+                        // ModR/M字节: mod=00, reg=目标寄存器, r/m=110 (直接寻址)
+                        const modRM = (regMap[destReg] << 3) | 0x06; // 0b00rrr110
+                        
+                        // 解析源操作数（应该是标签或地址）
+                        let offset = 0;
+                        if (this.symbols.hasOwnProperty(srcOperand)) {
+                            offset = this.symbols[srcOperand];
+                        } else if (this.isImmediate(srcOperand)) {
+                            offset = this.parseImmediate(srcOperand);
+                        }
+                        
+                        return {
+                            address,
+                            opcode: 'LEA',
+                            operands: [destReg.toUpperCase(), srcOperand],
+                            machineCode: [0x8d, modRM, offset & 0xff, (offset >> 8) & 0xff],
+                            length: 4,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                }
+                break;
             case 'jnz':
             case 'jne':
                 if (operands.length === 1) {
@@ -1053,6 +1092,42 @@ class Assembler {
                             operands: [reg.toUpperCase()],
                             machineCode: [0x48 + regMap[reg]],
                             length: 1,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                }
+                break;
+            case 'lea':
+                if (operands.length === 2) {
+                    const destReg = operands[0].toLowerCase();
+                    const srcOperand = operands[1];
+                    
+                    // 检查目标是否是16位寄存器
+                    const regMap = {
+                        'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
+                        'sp': 4, 'bp': 5, 'si': 6, 'di': 7
+                    };
+                    
+                    if (regMap.hasOwnProperty(destReg)) {
+                        // LEA r16, m
+                        // 操作码: 0x8D
+                        // ModR/M字节: mod=00, reg=目标寄存器, r/m=110 (直接寻址)
+                        const modRM = (regMap[destReg] << 3) | 0x06; // 0b00rrr110
+                        
+                        // 解析源操作数（应该是标签或地址）
+                        let offset = 0;
+                        if (this.symbols.hasOwnProperty(srcOperand)) {
+                            offset = this.symbols[srcOperand];
+                        } else if (this.isImmediate(srcOperand)) {
+                            offset = this.parseImmediate(srcOperand);
+                        }
+                        
+                        return {
+                            address,
+                            opcode: 'LEA',
+                            operands: [destReg.toUpperCase(), srcOperand],
+                            machineCode: [0x8d, modRM, offset & 0xff, (offset >> 8) & 0xff],
+                            length: 4,
                             originalLine: originalLine.trim()
                         };
                     }
