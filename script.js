@@ -156,6 +156,9 @@ function handleFileLoad(e) {
         assembler.loadFromFile(file).then((parsedInstructions) => {
             instructions = parsedInstructions;
 
+            // 重置CPU（包括寄存器和标志位）
+            cpu.reset();
+
             // 清空所有段内存
             clearAllMemory();
 
@@ -178,9 +181,14 @@ function handleFileLoad(e) {
             // 初始化不同段的内存值
             initializeSegmentMemory();
 
+            // 清空输出缓冲区（清屏）
+            cpu.outputBuffer = '';
+
+            // 更新显示
             updateInstructionsDisplay();
             updateRegistersDisplay();
             updateMemoryDisplay(0x0000);
+            updateDisplayOutput(); // 清空屏幕显示
 
             // 清除寄存器和内存操作跟踪
             cpu.clearRegisterOperations();
@@ -476,6 +484,9 @@ function resetSimulator() {
     // 清除寄存器操作高亮
     clearRegisterHighlights();
 
+    // 清空输出缓冲区（清屏）
+    cpu.outputBuffer = '';
+
     // 如果有指令，设置IP为第一条指令的地址
     if (instructions.length > 0) {
         cpu.ip = instructions[0].address;
@@ -489,6 +500,7 @@ function resetSimulator() {
     updateRegistersDisplay();
     updateMemoryDisplay(0x0000);
     updateInstructionsDisplay();
+    updateDisplayOutput(); // 清空屏幕显示
 
     // 重置按钮状态
     updateButtonStates(false);

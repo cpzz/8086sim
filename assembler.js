@@ -26,9 +26,18 @@ class Assembler {
             if (line.endsWith(':')) {
                 const label = line.slice(0, -1).trim();
                 this.symbols[label] = address;
-            } else if (line.toLowerCase().startsWith('db')) {
+            } else if (line.toLowerCase().includes('db')) {
+                // 检查DB指令前面是否有标签（如 "msg DB 'Hello'"）
+                const dbIndex = line.toLowerCase().indexOf('db');
+                if (dbIndex > 0) {
+                    const potentialLabel = line.substring(0, dbIndex).trim();
+                    // 如果不是空字符串且不是注释，则作为标签
+                    if (potentialLabel && !potentialLabel.startsWith(';')) {
+                        this.symbols[potentialLabel] = address;
+                    }
+                }
                 // 处理 DB 数据定义
-                const dataPart = line.substring(2).trim();
+                const dataPart = line.substring(dbIndex + 2).trim();
                 const data = this.parseDB(dataPart);
                 address += data.length;
             } else {
@@ -50,10 +59,20 @@ class Assembler {
                 continue;
             }
 
-            if (line.toLowerCase().startsWith('db')) {
+            if (line.toLowerCase().includes('db')) {
                 // 处理 DB 数据定义 - 数据写入数据段（EXE格式标准）
-                const dataPart = line.substring(2).trim();
+                const dbIndex = line.toLowerCase().indexOf('db');
+                const dataPart = line.substring(dbIndex + 2).trim();
                 const data = this.parseDB(dataPart);
+
+                // 提取标签名称（如果有）
+                let label = '';
+                if (dbIndex > 0) {
+                    const potentialLabel = line.substring(0, dbIndex).trim();
+                    if (potentialLabel && !potentialLabel.startsWith(';')) {
+                        label = potentialLabel;
+                    }
+                }
 
                 // 数据定义应该写入数据段
                 // 使用标签地址作为数据段中的偏移地址
@@ -71,6 +90,12 @@ class Assembler {
                     data: data,
                     label: label
                 });
+
+                // 写入数据段（DS = 0x2000）
+                const dsSegmentBase = 0x2000 << 4;
+                for (let j = 0; j < data.length; j++) {
+                    this.memory.write8(dsSegmentBase + dsOffset + j, data[j]);
+                }
 
                 // 仍然写入代码段（用于标签地址计算）
                 for (let j = 0; j < data.length; j++) {
@@ -124,7 +149,8 @@ class Assembler {
                 if ((operands[0] === 'bx' || operands[0] === 'cx' || operands[0] === 'dx') && this.isImmediate(operands[1])) return 4;
                 return 2;
             case 'mov':
-                if ((operands[0] === 'ax' || operands[0] === 'bx' || operands[0] === 'cx' || operands[0] === 'dx' || operands[0] === 'si' || operands[0] === 'di') && (operands[1].startsWith('0x') || operands[1].endsWith('h') || operands[1].endsWith('H'))) return 3;
+                // 16位寄存器立即数（包括标签）
+                if ((operands[0] === 'ax' || operands[0] === 'bx' || operands[0] === 'cx' || operands[0] === 'dx' || operands[0] === 'si' || operands[0] === 'di') && this.isImmediate(operands[1])) return 3;
                 // 8位寄存器立即数
                 if (['al', 'ah', 'bl', 'bh', 'cl', 'ch', 'dl', 'dh'].includes(operands[0]) && this.isImmediate(operands[1])) return 2;
                 return 2;

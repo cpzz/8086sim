@@ -302,23 +302,29 @@ body {
 /* 确保表格单元格自适应内容宽度 */
 .register-table {
     width: auto;
-    table-layout: auto;
+    table-layout: fixed;
 }
 
 .register-table td {
-    width: auto;
     padding: 6px 8px;
 }
 
 /* 通用寄存器表格特殊处理 */
 .general-registers {
     width: auto;
-    table-layout: auto;
+    table-layout: fixed;
 }
 
 .general-registers td {
     white-space: nowrap;
     padding: 6px 8px;
+}
+
+/* 确保所有通用寄存器表格单元格宽度固定 */
+.general-register-group td {
+    width: 50px;
+    min-width: 50px;
+    max-width: 50px;
 }
 
 /* 通用寄存器名字样式 */
@@ -327,24 +333,38 @@ body {
     background-color: #e9ecef;
     font-weight: 700;
     color: #2c3e50;
+    width: 50px;
+    min-width: 50px;
+    max-width: 50px;
 }
 
-/* 4位十六进制值的样式 */
+/* 4位十六进制值的样式（如FFFF） */
 #ax, #bx, #cx, #dx, #sp, #bp, #ip, #si, #di, #cs, #ds, #ss, #es {
     text-align: center;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    width: 70px;
+    min-width: 70px;
+    max-width: 70px;
+    letter-spacing: 1px;
 }
 
-/* 2位十六进制值的样式 */
+/* 2位十六进制值的样式（如FF） */
 #ah, #al, #bh, #bl, #ch, #cl, #dh, #dl {
     text-align: center;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    width: 50px;
+    min-width: 50px;
+    max-width: 50px;
+    letter-spacing: 1px;
 }
 
-/* 标志位值的样式 */
+/* 标志位值的样式（0或1） */
 .flags-table td:not(.flag-name) {
     text-align: center;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
 }
 
 /* 指针/索引寄存器布局 */
@@ -358,6 +378,25 @@ body {
     display: flex;
 }
 
+/* 确保指针/索引寄存器表格单元格宽度固定 */
+.pointer-index-registers td,
+.segment-registers td {
+    width: 50px;
+    min-width: 50px;
+    max-width: 50px;
+}
+
+/* 指针/索引寄存器和段寄存器的值样式（4位十六进制） */
+.pointer-index-registers td:not(.register-name),
+.segment-registers td:not(.register-name) {
+    text-align: center;
+    width: 70px !important;
+    min-width: 70px !important;
+    max-width: 70px !important;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    letter-spacing: 1px;
+}
+
 /* 指针/索引寄存器和段寄存器的名字样式 */
 .pointer-index-registers .register-name,
 .segment-registers .register-name {
@@ -365,12 +404,20 @@ body {
     background-color: #e9ecef;
     font-weight: 700;
     color: #2c3e50;
+    width: 50px;
+    min-width: 50px;
+    max-width: 50px;
 }
 
-/* 指针/索引寄存器和段寄存器的值样式 */
-.pointer-index-registers td,
-.segment-registers td {
+/* 指针/索引寄存器和段寄存器的值样式（4位十六进制） */
+.pointer-index-registers td:not(.register-name),
+.segment-registers td:not(.register-name) {
     text-align: center;
+    width: 70px;
+    min-width: 70px;
+    max-width: 70px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    letter-spacing: 1px;
 }
 
 /* 标志位名字样式 */
@@ -379,6 +426,25 @@ body {
     background-color: #e9ecef;
     font-weight: 700;
     color: #2c3e50;
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
+}
+
+/* 确保标志位表格单元格宽度固定 */
+.flags-table td {
+    width: 40px;
+    min-width: 40px;
+    max-width: 40px;
+}
+
+/* 标志位值的样式（0或1） */
+.flags-table td:not(.flag-name) {
+    text-align: center;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    width: 40px !important;
+    min-width: 40px !important;
+    max-width: 40px !important;
 }
 
 /* 确保寄存器面板能够适应表格宽度 */

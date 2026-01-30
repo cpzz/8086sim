@@ -765,7 +765,6 @@ class CPU8086 {
                         // DOS 功能 02h：显示字符（DL）
                         const dl = this.getRegister('dx') & 0xff;
                         const char = String.fromCharCode(dl);
-                        console.log('INT 21h/02h: 输出字符: ' + char);
                         // 将字符添加到输出缓冲区
                         this.outputBuffer += char;
                         // 调用更新显示的回调函数
@@ -788,8 +787,10 @@ class CPU8086 {
                         }
                     } else if (ah === 0x4c) {
                         // DOS 功能 4Ch：程序结束
-                        console.log('INT 21h/4Ch: 程序结束');
                         this.running = false;
+                        instructionLength = 2;
+                        this.ip += instructionLength;
+                        this.ip &= 0xffff;
                         return false;
                     }
                 }
@@ -818,7 +819,19 @@ class CPU8086 {
             case 0x4f: // DEC DI
                 const regDec = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'][opcode - 0x48];
                 const valueDec = this.registers[regDec];
-                this.setRegister(regDec, (valueDec - 1) & 0xffff);
+                const newValueDec = (valueDec - 1) & 0xffff;
+                this.setRegister(regDec, newValueDec);
+                // 设置标志位
+                this.flags.zf = (newValueDec === 0) ? 1 : 0;
+                this.flags.sf = (newValueDec & 0x8000) ? 1 : 0;
+                // 计算奇偶标志（基于低8位）
+                let parityDec = 0;
+                let valueParityDec = newValueDec & 0xff;
+                for (let i = 0; i < 8; i++) {
+                    parityDec += valueParityDec & 1;
+                    valueParityDec >>= 1;
+                }
+                this.flags.pf = (parityDec % 2 === 0) ? 1 : 0;
                 instructionLength = 1;
                 break;
             case 0xd0: // SHL/SHR r/m8, 1
@@ -1301,7 +1314,6 @@ class CPU8086 {
         }
 
         if (instructionCount >= maxInstructions) {
-            console.warn('执行指令数超过限制，可能存在无限循环');
             this.running = false;
         }
     }
