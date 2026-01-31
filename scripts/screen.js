@@ -1,8 +1,8 @@
 
 // 更新UI显示输出
 function updateDisplayOutput() {
-    // 如果当前正好在用户界面tab，则更新显示
-    if (currentLeftTab === 'ui') {
+    // 如果当前正好在屏幕tab，则更新显示
+    if (currentLeftTab === 'screen') {
         updateUIDisplay();
     }
 }
@@ -14,7 +14,7 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// 渲染用户界面控制界面 - DOS 80x25 文本模式
+// 渲染屏幕控制界面 - DOS 80x25 文本模式
 function renderDisplayControl(memoryGrid) {
     const outputText = cpu.outputBuffer || '';
     const hasOutput = outputText.length > 0;

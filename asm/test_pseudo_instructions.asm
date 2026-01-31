@@ -1,0 +1,25 @@
+; 测试伪指令处理
+.MODEL SMALL
+.STACK 100H
+
+.DATA
+    MSG DB 'Hello, World!', '$'
+
+.CODE
+MAIN PROC FAR
+    MOV AX, @DATA
+    MOV DS, AX
+    
+    MOV AH, 9
+    LEA DX, MSG
+    INT 21H
+    
+    MOV AH, 4CH
+    INT 21H
+MAIN ENDP
+
+MYPROC PROC NEAR
+    RET
+MYPROC ENDP
+
+END MAIN

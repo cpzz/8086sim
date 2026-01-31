@@ -5,7 +5,7 @@ let assembler;
 let instructions = [];
 let breakpoints = new Set();
 let currentMemorySegment = 'cs'; // 当前选中的内存段
-let currentLeftTab = 'ui'; // 当前选中的左侧tab: ui, registers, memory
+let currentLeftTab = 'screen'; // 当前选中的左侧tab: screen, registers, memory
 let previousRegisterValues = {}; // 存储上一次的寄存器值
 let hasExecuted = false; // 跟踪是否已经执行了指令
 let isAtEnd = false; // 跟踪是否执行到了最后一条指令
@@ -101,7 +101,7 @@ function initUI() {
         }
     });
 
-    // 左侧tab页切换（用户界面/寄存器/内存）
+    // 左侧tab页切换（屏幕/寄存器/内存）
     const leftTabs = document.querySelectorAll('.left-tab');
     leftTabs.forEach(tab => {
         tab.addEventListener('click', () => {
@@ -122,7 +122,7 @@ function initUI() {
             }
 
             // 更新显示
-            if (currentLeftTab === 'ui') {
+            if (currentLeftTab === 'screen') {
                 updateUIDisplay();
             } else if (currentLeftTab === 'registers') {
                 updateRegistersDisplay();
@@ -187,7 +187,11 @@ function handleFileLoad(e) {
             // 更新显示
             updateInstructionsDisplay();
             updateRegistersDisplay();
-            updateMemoryDisplay(0x0000);
+            // 保持当前选中的内存段不变
+            // 只有当当前显示的是内存tab时，才更新内存显示
+            if (currentLeftTab === 'memory') {
+                updateMemoryDisplay(0x0000);
+            }
             updateDisplayOutput(); // 清空屏幕显示
 
             // 清除寄存器和内存操作跟踪
@@ -231,35 +235,11 @@ function clearAllMemory() {
 
 // 初始化不同段的内存值
 function initializeSegmentMemory() {
-    // 代码段 (CS) 初始化
-    const csBase = cpu.getSegmentRegister('cs') << 4;
-    // 计算所有指令占用的总长度
-    let totalInstructionLength = 0;
-    for (let i = 0; i < instructions.length; i++) {
-        totalInstructionLength += instructions[i].length;
-    }
-    // 将指令从0x00000复制到CS段对应的内存位置
-    for (let i = 0; i < totalInstructionLength; i++) {
-        const instructionByte = memory.read8(i);
-        memory.write8(csBase + i, instructionByte);
-    }
-    // 指令之外的部分设置为0
-    for (let i = totalInstructionLength; i < 65536; i++) {
-        memory.write8(csBase + i, 0);
-    }
+    // 使用新添加的方法写入数据段和代码段
+    assembler.writeDataSegmentToMemory(cpu);
+    assembler.writeCodeSegmentToMemory(cpu);
 
-    // 数据段 (DS) 初始化 - 将汇编器收集的数据定义写入DS段
-    const dsBase = cpu.getSegmentRegister('ds') << 4;
-    if (assembler.dataSegments && assembler.dataSegments.length > 0) {
-        // 将数据定义复制到DS段
-        for (const dataSegment of assembler.dataSegments) {
-            for (let j = 0; j < dataSegment.data.length; j++) {
-                memory.write8(dsBase + dataSegment.offset + j, dataSegment.data[j]);
-            }
-        }
-    }
-
-    // 堆栈段 (SS) 初始化 - 如果不清空内存，保持随机数据，但将栈顶的 FFFF 和 FFFE 设置为 0
+    // 堆栈段 (SS) 初始化 - 将栈顶的 FFFF 和 FFFE 设置为 0
     const ssBase = cpu.getSegmentRegister('ss') << 4;
     memory.write8(ssBase + 0xFFFE, 0);
     memory.write8(ssBase + 0xFFFF, 0);

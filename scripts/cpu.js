@@ -622,7 +622,17 @@ class CPU8086 {
                     this.setRegister(dstRegToName[rm89], this.getRegister(srcRegToName[reg89]));
                     instructionLength = 2;
                 } else if (mod89 === 0 && rm89 === 6) {
-                    // [BP] + disp16 (暂时不支持偏移量)
+                    // 直接寻址模式：MOV m16, r16 - [disp16]
+                    // 读取偏移量
+                    const offset16 = this.readMemory16(currentAddress + 2);
+                    // 计算内存地址（使用 DS 段）
+                    const address = this.getMemoryAddress(this.getSegmentRegister('ds'), offset16);
+                    // 读取源寄存器值
+                    const srcValue = this.getRegister(srcRegToName[reg89]);
+                    // 写入内存
+                    this.writeMemory16(address, srcValue);
+                    // 跟踪内存写入操作
+                    this.memoryOperations.set(address, { type: 'write', value: srcValue });
                     instructionLength = 4;
                 } else {
                     // 寄存器到内存传送
@@ -774,12 +784,13 @@ class CPU8086 {
                     } else if (ah === 0x09) {
                         // DOS 功能 09h：显示字符串（DS:DX）
                         const ds = this.getSegmentRegister('ds');
-                        const dx = this.getRegister('dx');
+                        let dx = this.getRegister('dx');
                         const stringAddress = (ds << 4) + dx;
                         let char = this.readMemory8(stringAddress);
                         while (char !== 0x24) { // 0x24 是 '$' 结束符
                             this.outputBuffer += String.fromCharCode(char);
-                            char = this.readMemory8((ds << 4) + (++dx));
+                            dx++;
+                            char = this.readMemory8((ds << 4) + dx);
                         }
                         // 调用更新显示的回调函数
                         if (this.updateOutputDisplay) {
@@ -1105,6 +1116,20 @@ class CPU8086 {
                     instructionLength = 2;
                 }
                 break;
+            case 0x7f: // JG short
+                const offset8jg = this.readMemory8(currentAddress + 1);
+                // JG: 大于跳转，条件是 (SF === OF) && (ZF === 0)
+                if ((this.flags.sf === this.flags.of) && (this.flags.zf === 0)) {
+                    // 符号扩展
+                    const signedOffsetJg = offset8jg > 0x7f ? offset8jg - 0x100 : offset8jg;
+                    // 跳转到目标地址：当前IP + 指令长度 + 偏移量
+                    this.ip = this.ip + 2 + signedOffsetJg;
+                    this.ip &= 0xffff;
+                    instructionLength = 0; // 不增加IP，因为已经手动设置了
+                } else {
+                    instructionLength = 2;
+                }
+                break;
             case 0x81: // Group - ADD/OR/ADC/SBB/AND/SUB/XOR/CMP Ev, Iv
                 const modrm81 = this.readMemory8(currentAddress + 1);
                 const reg81 = (modrm81 >> 3) & 0x7; // 扩展操作码
@@ -1184,6 +1209,33 @@ class CPU8086 {
                     instructionLength = 2;
                 } else {
                     console.error(`执行错误: MOV Sreg 不支持的内存寻址模式`);
+                    this.running = false;
+                    return false;
+                }
+                break;
+            case 0x8d: // LEA r16, m
+                const modrm8d = this.readMemory8(currentAddress + 1);
+                const reg8d = (modrm8d >> 3) & 0x7; // 目标寄存器
+                const mod8d = (modrm8d >> 6) & 0x3;
+                const rm8d = modrm8d & 0x7;
+
+                // 寄存器映射
+                const regToName8d = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+                const dstReg = regToName8d[reg8d];
+
+                if (mod8d === 0 && rm8d === 6) {
+                    // 直接寻址模式：LEA r16, [disp16]
+                    const offset16 = this.readMemory16(currentAddress + 2);
+                    this.setRegister(dstReg, offset16);
+                    instructionLength = 4;
+                } else if (mod8d === 3) {
+                    // 寄存器到寄存器（无意义，但为了完整性实现）
+                    const srcReg = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'][rm8d];
+                    const srcValue = this.getRegister(srcReg);
+                    this.setRegister(dstReg, srcValue);
+                    instructionLength = 2;
+                } else {
+                    console.error(`执行错误: LEA 不支持的寻址模式`);
                     this.running = false;
                     return false;
                 }
