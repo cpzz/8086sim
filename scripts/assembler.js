@@ -299,6 +299,44 @@ class Assembler {
         switch (opcode) {
             case 'nop':
             case 'ret':
+            case 'retf':
+            case 'pushf':
+            case 'popf':
+            case 'hlt':
+            case 'cmc':
+            case 'clc':
+            case 'stc':
+            case 'cld':
+            case 'std':
+            case 'cli':
+            case 'sti':
+            case 'into':
+            case 'iret':
+            case 'aaa':
+            case 'aas':
+            case 'daa':
+            case 'das':
+            case 'aam':
+            case 'aad':
+            case 'wait':
+            case 'lock':
+            case 'xlat':
+            case 'leave':
+            case 'movsb':
+            case 'movsw':
+            case 'cmpsb':
+            case 'cmpsw':
+            case 'scasb':
+            case 'scasw':
+            case 'lodsb':
+            case 'lodsw':
+            case 'stosb':
+            case 'stosw':
+            case 'rep':
+            case 'repz':
+            case 'repe':
+            case 'repnz':
+            case 'repne':
                 return 1;
             case 'add':
             case 'sub':
@@ -306,6 +344,7 @@ class Assembler {
             case 'or':
             case 'xor':
             case 'adc':
+            case 'sbb':
                 if (operands[0] === 'al') return 2;
                 if (operands[0] === 'ax') return 3;
                 if ((operands[0] === 'bx' || operands[0] === 'cx' || operands[0] === 'dx') && this.isImmediate(operands[1])) return 4;
@@ -318,11 +357,18 @@ class Assembler {
                 return 2;
             case 'shl':
             case 'shr':
+            case 'sal':
+            case 'sar':
+            case 'rol':
+            case 'ror':
+            case 'rcl':
+            case 'rcr':
                 return 2;
             case 'push':
             case 'pop':
                 return 1;
             case 'cmp':
+            case 'test':
                 if (operands[0] === 'al') return 2;
                 if (operands[0] === 'ax') return 3;
                 return 2;
@@ -332,6 +378,38 @@ class Assembler {
             case 'je':
             case 'jnz':
             case 'jne':
+            case 'jc':
+            case 'jb':
+            case 'jnae':
+            case 'jnc':
+            case 'jnb':
+            case 'jae':
+            case 'js':
+            case 'jns':
+            case 'jo':
+            case 'jno':
+            case 'jp':
+            case 'jpe':
+            case 'jnp':
+            case 'jpo':
+            case 'jl':
+            case 'jnge':
+            case 'jnl':
+            case 'jge':
+            case 'ja':
+            case 'jnbe':
+            case 'jna':
+            case 'jbe':
+            case 'jg':
+            case 'jnle':
+            case 'jng':
+            case 'jle':
+            case 'loop':
+            case 'loopz':
+            case 'loope':
+            case 'loopnz':
+            case 'loopne':
+            case 'jcxz':
                 return 2;
             case 'call':
                 return 3;
@@ -339,10 +417,28 @@ class Assembler {
                 return 2;
             case 'inc':
             case 'dec':
+            case 'neg':
+            case 'not':
                 return 1;
+            case 'mul':
+            case 'imul':
+            case 'div':
+            case 'idiv':
+                return 2;
             case 'lea':
-                // LEA r16, m - 操作码1字节 + ModR/M 1字节 + 位移2字节（如果需要）
+            case 'lds':
+            case 'les':
                 return 4;
+            case 'in':
+                if (operands[1] === 'dx') return 1;
+                return 2;
+            case 'out':
+                if (operands[0] === 'dx') return 1;
+                return 2;
+            case 'enter':
+                return 4;
+            case 'xchg':
+                return 2;
             default:
                 return 2;
         }
@@ -1405,48 +1501,1592 @@ class Assembler {
                     };
                 }
                 break;
-            case 'jg':
-                if (operands.length === 1) {
-                    const targetAddress = this.parseImmediate(operands[0]);
-                    // JG short 的偏移量 = 目标地址 - (当前地址 + 指令长度)
-                    const offset = targetAddress - (address + 2);
-                    // 将偏移量转换为有符号的8位整数
-                    const offset8 = offset & 0xff;
+            case 'sbb':
+                if (operands[0] === 'al') {
+                    const imm8 = this.parseImmediate(operands[1]);
                     return {
                         address,
-                        opcode: 'JG',
-                        operands: [operands[0]],
-                        machineCode: [0x7f, offset8],
+                        opcode: 'SBB',
+                        operands: ['AL', operands[1]],
+                        machineCode: [0x1c, imm8],
                         length: 2,
-                        originalLine: 'JG'
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'ax') {
+                    const imm16 = this.parseImmediate(operands[1]);
+                    return {
+                        address,
+                        opcode: 'SBB',
+                        operands: ['AX', operands[1]],
+                        machineCode: [0x1d, imm16 & 0xff, (imm16 >> 8) & 0xff],
+                        length: 3,
+                        originalLine: originalLine.trim()
                     };
                 }
                 break;
+            case 'neg':
+                if (operands[0] === 'al') {
+                    return {
+                        address,
+                        opcode: 'NEG',
+                        operands: ['AL'],
+                        machineCode: [0xf6, 0xd8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'ax') {
+                    return {
+                        address,
+                        opcode: 'NEG',
+                        operands: ['AX'],
+                        machineCode: [0xf7, 0xd8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'bl') {
+                    return {
+                        address,
+                        opcode: 'NEG',
+                        operands: ['BL'],
+                        machineCode: [0xf6, 0xdb],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'bx') {
+                    return {
+                        address,
+                        opcode: 'NEG',
+                        operands: ['BX'],
+                        machineCode: [0xf7, 0xdb],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'cl') {
+                    return {
+                        address,
+                        opcode: 'NEG',
+                        operands: ['CL'],
+                        machineCode: [0xf6, 0xd9],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'cx') {
+                    return {
+                        address,
+                        opcode: 'NEG',
+                        operands: ['CX'],
+                        machineCode: [0xf7, 0xd9],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'dl') {
+                    return {
+                        address,
+                        opcode: 'NEG',
+                        operands: ['DL'],
+                        machineCode: [0xf6, 0xda],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'dx') {
+                    return {
+                        address,
+                        opcode: 'NEG',
+                        operands: ['DX'],
+                        machineCode: [0xf7, 0xda],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'not':
+                if (operands[0] === 'al') {
+                    return {
+                        address,
+                        opcode: 'NOT',
+                        operands: ['AL'],
+                        machineCode: [0xf6, 0xd0],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'ax') {
+                    return {
+                        address,
+                        opcode: 'NOT',
+                        operands: ['AX'],
+                        machineCode: [0xf7, 0xd0],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'bl') {
+                    return {
+                        address,
+                        opcode: 'NOT',
+                        operands: ['BL'],
+                        machineCode: [0xf6, 0xd3],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'bx') {
+                    return {
+                        address,
+                        opcode: 'NOT',
+                        operands: ['BX'],
+                        machineCode: [0xf7, 0xd3],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'cl') {
+                    return {
+                        address,
+                        opcode: 'NOT',
+                        operands: ['CL'],
+                        machineCode: [0xf6, 0xd1],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'cx') {
+                    return {
+                        address,
+                        opcode: 'NOT',
+                        operands: ['CX'],
+                        machineCode: [0xf7, 0xd1],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'dl') {
+                    return {
+                        address,
+                        opcode: 'NOT',
+                        operands: ['DL'],
+                        machineCode: [0xf6, 0xd2],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'dx') {
+                    return {
+                        address,
+                        opcode: 'NOT',
+                        operands: ['DX'],
+                        machineCode: [0xf7, 0xd2],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'test':
+                if (operands[0] === 'al') {
+                    const imm8 = this.parseImmediate(operands[1]);
+                    return {
+                        address,
+                        opcode: 'TEST',
+                        operands: ['AL', operands[1]],
+                        machineCode: [0xa8, imm8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'ax') {
+                    const imm16 = this.parseImmediate(operands[1]);
+                    return {
+                        address,
+                        opcode: 'TEST',
+                        operands: ['AX', operands[1]],
+                        machineCode: [0xa9, imm16 & 0xff, (imm16 >> 8) & 0xff],
+                        length: 3,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'mul':
+                if (operands[0] === 'bl') {
+                    return {
+                        address,
+                        opcode: 'MUL',
+                        operands: ['BL'],
+                        machineCode: [0xf6, 0xe3],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'bx') {
+                    return {
+                        address,
+                        opcode: 'MUL',
+                        operands: ['BX'],
+                        machineCode: [0xf7, 0xe3],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'cl') {
+                    return {
+                        address,
+                        opcode: 'MUL',
+                        operands: ['CL'],
+                        machineCode: [0xf6, 0xe1],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'cx') {
+                    return {
+                        address,
+                        opcode: 'MUL',
+                        operands: ['CX'],
+                        machineCode: [0xf7, 0xe1],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'dl') {
+                    return {
+                        address,
+                        opcode: 'MUL',
+                        operands: ['DL'],
+                        machineCode: [0xf6, 0xe2],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'dx') {
+                    return {
+                        address,
+                        opcode: 'MUL',
+                        operands: ['DX'],
+                        machineCode: [0xf7, 0xe2],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'ah') {
+                    return {
+                        address,
+                        opcode: 'MUL',
+                        operands: ['AH'],
+                        machineCode: [0xf6, 0xe4],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'ch') {
+                    return {
+                        address,
+                        opcode: 'MUL',
+                        operands: ['CH'],
+                        machineCode: [0xf6, 0xe5],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'dh') {
+                    return {
+                        address,
+                        opcode: 'MUL',
+                        operands: ['DH'],
+                        machineCode: [0xf6, 0xe6],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'bh') {
+                    return {
+                        address,
+                        opcode: 'MUL',
+                        operands: ['BH'],
+                        machineCode: [0xf6, 0xe7],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'imul':
+                if (operands[0] === 'bl') {
+                    return {
+                        address,
+                        opcode: 'IMUL',
+                        operands: ['BL'],
+                        machineCode: [0xf6, 0xeb],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'bx') {
+                    return {
+                        address,
+                        opcode: 'IMUL',
+                        operands: ['BX'],
+                        machineCode: [0xf7, 0xeb],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'cl') {
+                    return {
+                        address,
+                        opcode: 'IMUL',
+                        operands: ['CL'],
+                        machineCode: [0xf6, 0xe9],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'cx') {
+                    return {
+                        address,
+                        opcode: 'IMUL',
+                        operands: ['CX'],
+                        machineCode: [0xf7, 0xe9],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'dl') {
+                    return {
+                        address,
+                        opcode: 'IMUL',
+                        operands: ['DL'],
+                        machineCode: [0xf6, 0xea],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'dx') {
+                    return {
+                        address,
+                        opcode: 'IMUL',
+                        operands: ['DX'],
+                        machineCode: [0xf7, 0xea],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'div':
+                if (operands[0] === 'bl') {
+                    return {
+                        address,
+                        opcode: 'DIV',
+                        operands: ['BL'],
+                        machineCode: [0xf6, 0xf3],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'bx') {
+                    return {
+                        address,
+                        opcode: 'DIV',
+                        operands: ['BX'],
+                        machineCode: [0xf7, 0xf3],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'cl') {
+                    return {
+                        address,
+                        opcode: 'DIV',
+                        operands: ['CL'],
+                        machineCode: [0xf6, 0xf1],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'cx') {
+                    return {
+                        address,
+                        opcode: 'DIV',
+                        operands: ['CX'],
+                        machineCode: [0xf7, 0xf1],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'dl') {
+                    return {
+                        address,
+                        opcode: 'DIV',
+                        operands: ['DL'],
+                        machineCode: [0xf6, 0xf2],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'dx') {
+                    return {
+                        address,
+                        opcode: 'DIV',
+                        operands: ['DX'],
+                        machineCode: [0xf7, 0xf2],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'idiv':
+                if (operands[0] === 'bl') {
+                    return {
+                        address,
+                        opcode: 'IDIV',
+                        operands: ['BL'],
+                        machineCode: [0xf6, 0xfb],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'bx') {
+                    return {
+                        address,
+                        opcode: 'IDIV',
+                        operands: ['BX'],
+                        machineCode: [0xf7, 0xfb],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'cl') {
+                    return {
+                        address,
+                        opcode: 'IDIV',
+                        operands: ['CL'],
+                        machineCode: [0xf6, 0xf9],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'cx') {
+                    return {
+                        address,
+                        opcode: 'IDIV',
+                        operands: ['CX'],
+                        machineCode: [0xf7, 0xf9],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'dl') {
+                    return {
+                        address,
+                        opcode: 'IDIV',
+                        operands: ['DL'],
+                        machineCode: [0xf6, 0xfa],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'dx') {
+                    return {
+                        address,
+                        opcode: 'IDIV',
+                        operands: ['DX'],
+                        machineCode: [0xf7, 0xfa],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'aaa':
+                return {
+                    address,
+                    opcode: 'AAA',
+                    operands: [],
+                    machineCode: [0x37],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'aas':
+                return {
+                    address,
+                    opcode: 'AAS',
+                    operands: [],
+                    machineCode: [0x3f],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'daa':
+                return {
+                    address,
+                    opcode: 'DAA',
+                    operands: [],
+                    machineCode: [0x27],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'das':
+                return {
+                    address,
+                    opcode: 'DAS',
+                    operands: [],
+                    machineCode: [0x2f],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'aam':
+                return {
+                    address,
+                    opcode: 'AAM',
+                    operands: [],
+                    machineCode: [0xd4, 0x0a],
+                    length: 2,
+                    originalLine: originalLine.trim()
+                };
+            case 'aad':
+                return {
+                    address,
+                    opcode: 'AAD',
+                    operands: [],
+                    machineCode: [0xd5, 0x0a],
+                    length: 2,
+                    originalLine: originalLine.trim()
+                };
+            case 'rol':
+                if (operands[1] === '1') {
+                    if (operands[0] === 'al') {
+                        return {
+                            address,
+                            opcode: 'ROL',
+                            operands: ['AL', '1'],
+                            machineCode: [0xd0, 0xc0],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                    if (operands[0] === 'ax') {
+                        return {
+                            address,
+                            opcode: 'ROL',
+                            operands: ['AX', '1'],
+                            machineCode: [0xd1, 0xc0],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                    if (operands[0] === 'bl') {
+                        return {
+                            address,
+                            opcode: 'ROL',
+                            operands: ['BL', '1'],
+                            machineCode: [0xd0, 0xc3],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                    if (operands[0] === 'bx') {
+                        return {
+                            address,
+                            opcode: 'ROL',
+                            operands: ['BX', '1'],
+                            machineCode: [0xd1, 0xc3],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                }
+                break;
+            case 'ror':
+                if (operands[1] === '1') {
+                    if (operands[0] === 'al') {
+                        return {
+                            address,
+                            opcode: 'ROR',
+                            operands: ['AL', '1'],
+                            machineCode: [0xd0, 0xc8],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                    if (operands[0] === 'ax') {
+                        return {
+                            address,
+                            opcode: 'ROR',
+                            operands: ['AX', '1'],
+                            machineCode: [0xd1, 0xc8],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                    if (operands[0] === 'bl') {
+                        return {
+                            address,
+                            opcode: 'ROR',
+                            operands: ['BL', '1'],
+                            machineCode: [0xd0, 0xcb],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                    if (operands[0] === 'bx') {
+                        return {
+                            address,
+                            opcode: 'ROR',
+                            operands: ['BX', '1'],
+                            machineCode: [0xd1, 0xcb],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                }
+                break;
+            case 'rcl':
+                if (operands[1] === '1') {
+                    if (operands[0] === 'al') {
+                        return {
+                            address,
+                            opcode: 'RCL',
+                            operands: ['AL', '1'],
+                            machineCode: [0xd0, 0xd0],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                    if (operands[0] === 'ax') {
+                        return {
+                            address,
+                            opcode: 'RCL',
+                            operands: ['AX', '1'],
+                            machineCode: [0xd1, 0xd0],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                }
+                break;
+            case 'rcr':
+                if (operands[1] === '1') {
+                    if (operands[0] === 'al') {
+                        return {
+                            address,
+                            opcode: 'RCR',
+                            operands: ['AL', '1'],
+                            machineCode: [0xd0, 0xd8],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                    if (operands[0] === 'ax') {
+                        return {
+                            address,
+                            opcode: 'RCR',
+                            operands: ['AX', '1'],
+                            machineCode: [0xd1, 0xd8],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                }
+                break;
+            case 'sar':
+                if (operands[1] === '1') {
+                    if (operands[0] === 'al') {
+                        return {
+                            address,
+                            opcode: 'SAR',
+                            operands: ['AL', '1'],
+                            machineCode: [0xd0, 0xf8],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                    if (operands[0] === 'ax') {
+                        return {
+                            address,
+                            opcode: 'SAR',
+                            operands: ['AX', '1'],
+                            machineCode: [0xd1, 0xf8],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                    if (operands[0] === 'bx') {
+                        return {
+                            address,
+                            opcode: 'SAR',
+                            operands: ['BX', '1'],
+                            machineCode: [0xd1, 0xfb],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                }
+                break;
+            case 'xchg':
+                if (operands[0] === 'ax' && operands[1] === 'bx') {
+                    return {
+                        address,
+                        opcode: 'XCHG',
+                        operands: ['AX', 'BX'],
+                        machineCode: [0x93],
+                        length: 1,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'bx' && operands[1] === 'ax') {
+                    return {
+                        address,
+                        opcode: 'XCHG',
+                        operands: ['BX', 'AX'],
+                        machineCode: [0x93],
+                        length: 1,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'ax' && operands[1] === 'cx') {
+                    return {
+                        address,
+                        opcode: 'XCHG',
+                        operands: ['AX', 'CX'],
+                        machineCode: [0x91],
+                        length: 1,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'cx' && operands[1] === 'ax') {
+                    return {
+                        address,
+                        opcode: 'XCHG',
+                        operands: ['CX', 'AX'],
+                        machineCode: [0x91],
+                        length: 1,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'ax' && operands[1] === 'dx') {
+                    return {
+                        address,
+                        opcode: 'XCHG',
+                        operands: ['AX', 'DX'],
+                        machineCode: [0x92],
+                        length: 1,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'dx' && operands[1] === 'ax') {
+                    return {
+                        address,
+                        opcode: 'XCHG',
+                        operands: ['DX', 'AX'],
+                        machineCode: [0x92],
+                        length: 1,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'stc':
+                return {
+                    address,
+                    opcode: 'STC',
+                    operands: [],
+                    machineCode: [0xf9],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'clc':
+                return {
+                    address,
+                    opcode: 'CLC',
+                    operands: [],
+                    machineCode: [0xf8],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'cmc':
+                return {
+                    address,
+                    opcode: 'CMC',
+                    operands: [],
+                    machineCode: [0xf5],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'std':
+                return {
+                    address,
+                    opcode: 'STD',
+                    operands: [],
+                    machineCode: [0xfd],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'cld':
+                return {
+                    address,
+                    opcode: 'CLD',
+                    operands: [],
+                    machineCode: [0xfc],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'sti':
+                return {
+                    address,
+                    opcode: 'STI',
+                    operands: [],
+                    machineCode: [0xfb],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'cli':
+                return {
+                    address,
+                    opcode: 'CLI',
+                    operands: [],
+                    machineCode: [0xfa],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'hlt':
+                return {
+                    address,
+                    opcode: 'HLT',
+                    operands: [],
+                    machineCode: [0xf4],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'nop':
+                return {
+                    address,
+                    opcode: 'NOP',
+                    operands: [],
+                    machineCode: [0x90],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'jc':
+            case 'jb':
+            case 'jnae':
+                if (operands.length === 1) {
+                    const targetAddress = this.parseImmediate(operands[0]);
+                    const offset = targetAddress - (address + 2);
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: opcode === 'jc' ? 'JC' : (opcode === 'jb' ? 'JB' : 'JNAE'),
+                        operands: [operands[0]],
+                        machineCode: [0x72, offset8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'jnc':
+            case 'jnb':
+            case 'jae':
+                if (operands.length === 1) {
+                    const targetAddress = this.parseImmediate(operands[0]);
+                    const offset = targetAddress - (address + 2);
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: opcode === 'jnc' ? 'JNC' : (opcode === 'jnb' ? 'JNB' : 'JAE'),
+                        operands: [operands[0]],
+                        machineCode: [0x73, offset8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'js':
+                if (operands.length === 1) {
+                    const targetAddress = this.parseImmediate(operands[0]);
+                    const offset = targetAddress - (address + 2);
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: 'JS',
+                        operands: [operands[0]],
+                        machineCode: [0x78, offset8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'jns':
+                if (operands.length === 1) {
+                    const targetAddress = this.parseImmediate(operands[0]);
+                    const offset = targetAddress - (address + 2);
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: 'JNS',
+                        operands: [operands[0]],
+                        machineCode: [0x79, offset8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'jo':
+                if (operands.length === 1) {
+                    const targetAddress = this.parseImmediate(operands[0]);
+                    const offset = targetAddress - (address + 2);
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: 'JO',
+                        operands: [operands[0]],
+                        machineCode: [0x70, offset8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'jno':
+                if (operands.length === 1) {
+                    const targetAddress = this.parseImmediate(operands[0]);
+                    const offset = targetAddress - (address + 2);
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: 'JNO',
+                        operands: [operands[0]],
+                        machineCode: [0x71, offset8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'jp':
+            case 'jpe':
+                if (operands.length === 1) {
+                    const targetAddress = this.parseImmediate(operands[0]);
+                    const offset = targetAddress - (address + 2);
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: opcode === 'jp' ? 'JP' : 'JPE',
+                        operands: [operands[0]],
+                        machineCode: [0x7a, offset8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'jnp':
+            case 'jpo':
+                if (operands.length === 1) {
+                    const targetAddress = this.parseImmediate(operands[0]);
+                    const offset = targetAddress - (address + 2);
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: opcode === 'jnp' ? 'JNP' : 'JPO',
+                        operands: [operands[0]],
+                        machineCode: [0x7b, offset8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'jl':
+            case 'jnge':
+                if (operands.length === 1) {
+                    const targetAddress = this.parseImmediate(operands[0]);
+                    const offset = targetAddress - (address + 2);
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: opcode === 'jl' ? 'JL' : 'JNGE',
+                        operands: [operands[0]],
+                        machineCode: [0x7c, offset8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'jnl':
+            case 'jge':
+                if (operands.length === 1) {
+                    const targetAddress = this.parseImmediate(operands[0]);
+                    const offset = targetAddress - (address + 2);
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: opcode === 'jnl' ? 'JNL' : 'JGE',
+                        operands: [operands[0]],
+                        machineCode: [0x7d, offset8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'ja':
+            case 'jnbe':
+                if (operands.length === 1) {
+                    const targetAddress = this.parseImmediate(operands[0]);
+                    const offset = targetAddress - (address + 2);
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: opcode === 'ja' ? 'JA' : 'JNBE',
+                        operands: [operands[0]],
+                        machineCode: [0x77, offset8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'jna':
+            case 'jbe':
+                if (operands.length === 1) {
+                    const targetAddress = this.parseImmediate(operands[0]);
+                    const offset = targetAddress - (address + 2);
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: opcode === 'jna' ? 'JNA' : 'JBE',
+                        operands: [operands[0]],
+                        machineCode: [0x76, offset8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'loop':
+                if (operands.length === 1) {
+                    const targetAddress = this.parseImmediate(operands[0]);
+                    const offset = targetAddress - (address + 2);
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: 'LOOP',
+                        operands: [operands[0]],
+                        machineCode: [0xe2, offset8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'loopz':
+            case 'loope':
+                if (operands.length === 1) {
+                    const targetAddress = this.parseImmediate(operands[0]);
+                    const offset = targetAddress - (address + 2);
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: opcode === 'loopz' ? 'LOOPZ' : 'LOOPE',
+                        operands: [operands[0]],
+                        machineCode: [0xe1, offset8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'loopnz':
+            case 'loopne':
+                if (operands.length === 1) {
+                    const targetAddress = this.parseImmediate(operands[0]);
+                    const offset = targetAddress - (address + 2);
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: opcode === 'loopnz' ? 'LOOPNZ' : 'LOOPNE',
+                        operands: [operands[0]],
+                        machineCode: [0xe0, offset8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'jcxz':
+                if (operands.length === 1) {
+                    const targetAddress = this.parseImmediate(operands[0]);
+                    const offset = targetAddress - (address + 2);
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: 'JCXZ',
+                        operands: [operands[0]],
+                        machineCode: [0xe3, offset8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'into':
+                return {
+                    address,
+                    opcode: 'INTO',
+                    operands: [],
+                    machineCode: [0xce],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'iret':
+                return {
+                    address,
+                    opcode: 'IRET',
+                    operands: [],
+                    machineCode: [0xcf],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'retf':
+                return {
+                    address,
+                    opcode: 'RETF',
+                    operands: [],
+                    machineCode: [0xcb],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'pushf':
+                return {
+                    address,
+                    opcode: 'PUSHF',
+                    operands: [],
+                    machineCode: [0x9c],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'popf':
+                return {
+                    address,
+                    opcode: 'POPF',
+                    operands: [],
+                    machineCode: [0x9d],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'lds':
+                if (operands.length === 2) {
+                    const destReg = operands[0].toLowerCase();
+                    const regMap = {
+                        'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
+                        'sp': 4, 'bp': 5, 'si': 6, 'di': 7
+                    };
+                    if (regMap.hasOwnProperty(destReg)) {
+                        const modRM = (regMap[destReg] << 3) | 0x06; // 直接寻址
+                        // 对于标签，需要获取其地址
+                        let offset = 0;
+                        if (this.symbols.hasOwnProperty(operands[1])) {
+                            offset = this.symbols[operands[1]];
+                        }
+                        return {
+                            address,
+                            opcode: 'LDS',
+                            operands: [destReg.toUpperCase(), operands[1]],
+                            machineCode: [0xc5, modRM, offset & 0xff, (offset >> 8) & 0xff],
+                            length: 4,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                }
+                break;
+            case 'les':
+                if (operands.length === 2) {
+                    const destReg = operands[0].toLowerCase();
+                    const regMap = {
+                        'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
+                        'sp': 4, 'bp': 5, 'si': 6, 'di': 7
+                    };
+                    if (regMap.hasOwnProperty(destReg)) {
+                        const modRM = (regMap[destReg] << 3) | 0x06; // 直接寻址
+                        let offset = 0;
+                        if (this.symbols.hasOwnProperty(operands[1])) {
+                            offset = this.symbols[operands[1]];
+                        }
+                        return {
+                            address,
+                            opcode: 'LES',
+                            operands: [destReg.toUpperCase(), operands[1]],
+                            machineCode: [0xc4, modRM, offset & 0xff, (offset >> 8) & 0xff],
+                            length: 4,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                }
+                break;
+            case 'in':
+                if (operands.length === 2) {
+                    const dest = operands[0].toLowerCase();
+                    const port = operands[1].toLowerCase();
+                    if (dest === 'al' && this.isImmediate(port)) {
+                        const portNum = this.parseImmediate(port);
+                        if (portNum <= 255) {
+                            return {
+                                address,
+                                opcode: 'IN',
+                                operands: ['AL', port],
+                                machineCode: [0xe4, portNum & 0xff],
+                                length: 2,
+                                originalLine: originalLine.trim()
+                            };
+                        }
+                    }
+                    if (dest === 'ax' && this.isImmediate(port)) {
+                        const portNum = this.parseImmediate(port);
+                        if (portNum <= 255) {
+                            return {
+                                address,
+                                opcode: 'IN',
+                                operands: ['AX', port],
+                                machineCode: [0xe5, portNum & 0xff],
+                                length: 2,
+                                originalLine: originalLine.trim()
+                            };
+                        }
+                    }
+                    if (dest === 'al' && port === 'dx') {
+                        return {
+                            address,
+                            opcode: 'IN',
+                            operands: ['AL', 'DX'],
+                            machineCode: [0xec],
+                            length: 1,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                    if (dest === 'ax' && port === 'dx') {
+                        return {
+                            address,
+                            opcode: 'IN',
+                            operands: ['AX', 'DX'],
+                            machineCode: [0xed],
+                            length: 1,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                }
+                break;
+            case 'out':
+                if (operands.length === 2) {
+                    const port = operands[0].toLowerCase();
+                    const src = operands[1].toLowerCase();
+                    if (this.isImmediate(port) && src === 'al') {
+                        const portNum = this.parseImmediate(port);
+                        if (portNum <= 255) {
+                            return {
+                                address,
+                                opcode: 'OUT',
+                                operands: [port, 'AL'],
+                                machineCode: [0xe6, portNum & 0xff],
+                                length: 2,
+                                originalLine: originalLine.trim()
+                            };
+                        }
+                    }
+                    if (this.isImmediate(port) && src === 'ax') {
+                        const portNum = this.parseImmediate(port);
+                        if (portNum <= 255) {
+                            return {
+                                address,
+                                opcode: 'OUT',
+                                operands: [port, 'AX'],
+                                machineCode: [0xe7, portNum & 0xff],
+                                length: 2,
+                                originalLine: originalLine.trim()
+                            };
+                        }
+                    }
+                    if (port === 'dx' && src === 'al') {
+                        return {
+                            address,
+                            opcode: 'OUT',
+                            operands: ['DX', 'AL'],
+                            machineCode: [0xee],
+                            length: 1,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                    if (port === 'dx' && src === 'ax') {
+                        return {
+                            address,
+                            opcode: 'OUT',
+                            operands: ['DX', 'AX'],
+                            machineCode: [0xef],
+                            length: 1,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                }
+                break;
+            case 'movsb':
+                return {
+                    address,
+                    opcode: 'MOVSB',
+                    operands: [],
+                    machineCode: [0xa4],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'movsw':
+                return {
+                    address,
+                    opcode: 'MOVSW',
+                    operands: [],
+                    machineCode: [0xa5],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'cmpsb':
+                return {
+                    address,
+                    opcode: 'CMPSB',
+                    operands: [],
+                    machineCode: [0xa6],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'cmpsw':
+                return {
+                    address,
+                    opcode: 'CMPSW',
+                    operands: [],
+                    machineCode: [0xa7],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'scasb':
+                return {
+                    address,
+                    opcode: 'SCASB',
+                    operands: [],
+                    machineCode: [0xae],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'scasw':
+                return {
+                    address,
+                    opcode: 'SCASW',
+                    operands: [],
+                    machineCode: [0xaf],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'lodsb':
+                return {
+                    address,
+                    opcode: 'LODSB',
+                    operands: [],
+                    machineCode: [0xac],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'lodsw':
+                return {
+                    address,
+                    opcode: 'LODSW',
+                    operands: [],
+                    machineCode: [0xad],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'stosb':
+                return {
+                    address,
+                    opcode: 'STOSB',
+                    operands: [],
+                    machineCode: [0xaa],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'stosw':
+                return {
+                    address,
+                    opcode: 'STOSW',
+                    operands: [],
+                    machineCode: [0xab],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'rep':
+                return {
+                    address,
+                    opcode: 'REP',
+                    operands: [],
+                    machineCode: [0xf3],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'repe':
+            case 'repz':
+                return {
+                    address,
+                    opcode: opcode === 'repz' ? 'REPZ' : 'REPE',
+                    operands: [],
+                    machineCode: [0xf3],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'repne':
+            case 'repnz':
+                return {
+                    address,
+                    opcode: opcode === 'repnz' ? 'REPNZ' : 'REPNE',
+                    operands: [],
+                    machineCode: [0xf2],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'jg':
+            case 'jnle':
+                if (operands.length === 1) {
+                    const targetAddress = this.parseImmediate(operands[0]);
+                    const offset = targetAddress - (address + 2);
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: opcode === 'jg' ? 'JG' : 'JNLE',
+                        operands: [operands[0]],
+                        machineCode: [0x7f, offset8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'jng':
+            case 'jle':
+                if (operands.length === 1) {
+                    const targetAddress = this.parseImmediate(operands[0]);
+                    const offset = targetAddress - (address + 2);
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: opcode === 'jng' ? 'JNG' : 'JLE',
+                        operands: [operands[0]],
+                        machineCode: [0x7e, offset8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'jb':
+            case 'jnae':
+            case 'jc':
+                if (operands.length === 1) {
+                    const targetAddress = this.parseImmediate(operands[0]);
+                    const offset = targetAddress - (address + 2);
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: opcode === 'jc' ? 'JC' : (opcode === 'jb' ? 'JB' : 'JNAE'),
+                        operands: [operands[0]],
+                        machineCode: [0x72, offset8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'jnb':
+            case 'jae':
+            case 'jnc':
+                if (operands.length === 1) {
+                    const targetAddress = this.parseImmediate(operands[0]);
+                    const offset = targetAddress - (address + 2);
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: opcode === 'jnc' ? 'JNC' : (opcode === 'jnb' ? 'JNB' : 'JAE'),
+                        operands: [operands[0]],
+                        machineCode: [0x73, offset8],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'wait':
+                return {
+                    address,
+                    opcode: 'WAIT',
+                    operands: [],
+                    machineCode: [0x9b],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'esc':
+                // ESC指令格式: ESC opcode, source
+                // 实际上ESC是处理器指令前缀，用于协处理器
+                if (operands.length >= 1) {
+                    const escapeCode = this.parseImmediate(operands[0]);
+                    const modRM = (escapeCode & 0x07) << 3;
+                    return {
+                        address,
+                        opcode: 'ESC',
+                        operands: operands,
+                        machineCode: [0xd8 | (escapeCode >> 3), modRM],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'lock':
+                return {
+                    address,
+                    opcode: 'LOCK',
+                    operands: [],
+                    machineCode: [0xf0],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'xlat':
+                return {
+                    address,
+                    opcode: 'XLAT',
+                    operands: [],
+                    machineCode: [0xd7],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
+            case 'enter':
+                if (operands.length >= 1) {
+                    const imm16 = this.parseImmediate(operands[0]);
+                    const nesting = operands.length > 1 ? this.parseImmediate(operands[1]) : 0;
+                    return {
+                        address,
+                        opcode: 'ENTER',
+                        operands: [imm16, nesting],
+                        machineCode: [0xc8, imm16 & 0xff, (imm16 >> 8) & 0xff, nesting & 0xff],
+                        length: 4,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
+            case 'leave':
+                return {
+                    address,
+                    opcode: 'LEAVE',
+                    operands: [],
+                    machineCode: [0xc9],
+                    length: 1,
+                    originalLine: originalLine.trim()
+                };
             case 'lea':
                 if (operands.length === 2) {
                     const destReg = operands[0].toLowerCase();
                     const srcOperand = operands[1];
                     
-                    // 检查目标是否是16位寄存器
                     const regMap = {
                         'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
                         'sp': 4, 'bp': 5, 'si': 6, 'di': 7
                     };
                     
                     if (regMap.hasOwnProperty(destReg)) {
-                        // LEA r16, m
-                        // 操作码: 0x8D
-                        // ModR/M字节: mod=00, reg=目标寄存器, r/m=110 (直接寻址)
-                        const modRM = (regMap[destReg] << 3) | 0x06; // 0b00rrr110
-                        
-                        // 解析源操作数（应该是标签或地址）
+                        const modRM = (regMap[destReg] << 3) | 0x06;
                         let offset = 0;
                         if (this.symbols.hasOwnProperty(srcOperand)) {
                             offset = this.symbols[srcOperand];
                         } else if (this.isImmediate(srcOperand)) {
                             offset = this.parseImmediate(srcOperand);
                         }
-                        
                         return {
                             address,
                             opcode: 'LEA',
@@ -1456,24 +3096,6 @@ class Assembler {
                             originalLine: originalLine.trim()
                         };
                     }
-                }
-                break;
-            case 'jnz':
-            case 'jne':
-                if (operands.length === 1) {
-                    const targetAddress = this.parseImmediate(operands[0]);
-                    // JNZ/JNE short 的偏移量 = 目标地址 - (当前地址 + 指令长度)
-                    const offset = targetAddress - (address + 2);
-                    // 将偏移量转换为有符号的8位整数
-                    const offset8 = offset & 0xff;
-                    return {
-                        address,
-                        opcode: opcode === 'jnz' ? 'JNZ' : 'JNE',
-                        operands: [operands[0]],
-                        machineCode: [0x75, offset8],
-                        length: 2,
-                        originalLine: opcode === 'jnz' ? 'JNZ' : 'JNE'
-                    };
                 }
                 break;
             case 'int':
@@ -1486,98 +3108,6 @@ class Assembler {
                         machineCode: [0xcd, imm8],
                         length: 2,
                         originalLine: originalLine.trim()
-                    };
-                }
-                break;
-            case 'inc':
-                if (operands.length === 1) {
-                    const reg = operands[0];
-                    const regMap = {
-                        'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
-                        'sp': 4, 'bp': 5, 'si': 6, 'di': 7
-                    };
-                    if (regMap.hasOwnProperty(reg)) {
-                        return {
-                            address,
-                            opcode: 'INC',
-                            operands: [reg.toUpperCase()],
-                            machineCode: [0x40 + regMap[reg]],
-                            length: 1,
-                            originalLine: originalLine.trim()
-                        };
-                    }
-                }
-                break;
-            case 'dec':
-                if (operands.length === 1) {
-                    const reg = operands[0];
-                    const regMap = {
-                        'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
-                        'sp': 4, 'bp': 5, 'si': 6, 'di': 7
-                    };
-                    if (regMap.hasOwnProperty(reg)) {
-                        return {
-                            address,
-                            opcode: 'DEC',
-                            operands: [reg.toUpperCase()],
-                            machineCode: [0x48 + regMap[reg]],
-                            length: 1,
-                            originalLine: originalLine.trim()
-                        };
-                    }
-                }
-                break;
-            case 'lea':
-                if (operands.length === 2) {
-                    const destReg = operands[0].toLowerCase();
-                    const srcOperand = operands[1];
-                    
-                    // 检查目标是否是16位寄存器
-                    const regMap = {
-                        'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
-                        'sp': 4, 'bp': 5, 'si': 6, 'di': 7
-                    };
-                    
-                    if (regMap.hasOwnProperty(destReg)) {
-                        // LEA r16, m
-                        // 操作码: 0x8D
-                        // ModR/M字节: mod=00, reg=目标寄存器, r/m=110 (直接寻址)
-                        const modRM = (regMap[destReg] << 3) | 0x06; // 0b00rrr110
-                        
-                        // 解析源操作数（应该是标签或地址）
-                        let offset = 0;
-                        if (this.symbols.hasOwnProperty(srcOperand)) {
-                            offset = this.symbols[srcOperand];
-                        } else if (this.isImmediate(srcOperand)) {
-                            offset = this.parseImmediate(srcOperand);
-                        }
-                        
-                        return {
-                            address,
-                            opcode: 'LEA',
-                            operands: [destReg.toUpperCase(), srcOperand],
-                            machineCode: [0x8d, modRM, offset & 0xff, (offset >> 8) & 0xff],
-                            length: 4,
-                            originalLine: originalLine.trim()
-                        };
-                    }
-                }
-                break;
-            case 'jnz':
-            case 'jne':
-                if (operands.length === 1) {
-                    const targetAddress = this.parseImmediate(operands[0]);
-                    // JNZ/JNE short 的偏移量 = 目标地址 - (当前地址 + 指令长度)
-                    const offset = targetAddress - (address + 2);
-                    // 将偏移量转换为有符号的8位整数
-                    const offset8 = offset & 0xff;
-                    return {
-                        address,
-                        opcode: opcode === 'jnz' ? 'JNZ' : 'JNE',
-                        operands: [operands[0]],
-                        machineCode: [0x75, offset8],
-                        length: 2,
-                        originalLine: opcode === 'jnz' ? 'JNZ' : 'JNE'
                     };
                 }
                 break;
