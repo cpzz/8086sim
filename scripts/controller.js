@@ -101,6 +101,18 @@ function initUI() {
         }
     });
 
+    // 同步指令表格头部和表格体的横向滚动
+    const instructionsTable = document.querySelector('.instructions-table');
+    const instructionsTableHeader = document.querySelector('.instructions-table-header');
+    const instructionsTableBody = document.querySelector('.instructions-table-body');
+
+    if (instructionsTable && instructionsTableHeader && instructionsTableBody) {
+        // 表格体滚动时同步表头
+        instructionsTableBody.addEventListener('scroll', function() {
+            instructionsTableHeader.style.transform = `translateX(-${this.scrollLeft}px)`;
+        });
+    }
+
     // 左侧tab页切换（屏幕/寄存器/内存）
     const leftTabs = document.querySelectorAll('.left-tab');
     leftTabs.forEach(tab => {
