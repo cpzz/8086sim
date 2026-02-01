@@ -172,9 +172,15 @@ function handleFileLoad(e) {
             breakpoints.clear();
             cpu.breakpoints.clear();
 
-            // 如果有指令，设置CPU的指令指针指向第一条指令的地址
+            // 如果有指令，设置CPU的指令指针指向入口点
             if (instructions.length > 0) {
-                cpu.ip = instructions[0].address;
+                // 如果汇编器指定了入口点（如 end main），则使用入口点
+                if (assembler.entryPoint && assembler.symbols.hasOwnProperty(assembler.entryPoint)) {
+                    cpu.ip = assembler.symbols[assembler.entryPoint];
+                } else {
+                    // 否则使用第一条指令的地址
+                    cpu.ip = instructions[0].address;
+                }
                 updateStatusIndicator('已加载文件');
             }
 
@@ -467,9 +473,15 @@ function resetSimulator() {
     // 清空输出缓冲区（清屏）
     cpu.outputBuffer = '';
 
-    // 如果有指令，设置IP为第一条指令的地址
+    // 如果有指令，设置IP为入口点
     if (instructions.length > 0) {
-        cpu.ip = instructions[0].address;
+        // 如果汇编器指定了入口点（如 end main），则使用入口点
+        if (assembler.entryPoint && assembler.symbols.hasOwnProperty(assembler.entryPoint)) {
+            cpu.ip = assembler.symbols[assembler.entryPoint];
+        } else {
+            // 否则使用第一条指令的地址
+            cpu.ip = instructions[0].address;
+        }
         currentState = '已加载文件';
         updateStatusIndicator('已加载文件');
     } else {
@@ -479,17 +491,11 @@ function resetSimulator() {
 
     updateRegistersDisplay();
     updateMemoryDisplay(0x0000);
-    updateInstructionsDisplay();
+    updateInstructionsDisplay(); // 更新指令列表显示，高亮当前指令
     updateDisplayOutput(); // 清空屏幕显示
 
     // 重置按钮状态
     updateButtonStates(false);
-
-    // 将代码列表滚动到顶部
-    const instructionsList = document.getElementById('instructions-list');
-    if (instructionsList) {
-        instructionsList.scrollTop = 0;
-    }
 }
 
 // 更新按钮状态
@@ -958,17 +964,15 @@ function updateInstructionsDisplay() {
         // 获取当前行在所有行中的索引
         const currentIndex = Array.from(allInstructionRows).indexOf(currentInstructionRow);
         
-        // 假设有11行可见，如果当前行在后半部分（第6行及之后），则滚动到中间
-        const visibleLines = 11;
+        // 计算可见行数（基于容器高度和行高）
+        const rowHeight = currentInstructionRow.offsetHeight;
+        const containerHeight = instructionsList.clientHeight;
+        const visibleLines = Math.max(1, Math.floor(containerHeight / rowHeight));
         const middleLineIndex = Math.floor(visibleLines / 2);
         
-        // 如果当前行索引大于中间行索引，则滚动到中间
-        if (currentIndex >= middleLineIndex) {
-            const rowHeight = currentInstructionRow.offsetHeight;
-            // 计算滚动到使当前行在中间的位置
-            const scrollTo = (currentIndex - middleLineIndex) * rowHeight;
-            instructionsList.scrollTop = scrollTo;
-        }
+        // 计算滚动到使当前行在中间的位置
+        const scrollTo = Math.max(0, (currentIndex - middleLineIndex) * rowHeight);
+        instructionsList.scrollTop = scrollTo;
     }
 }
 

@@ -800,7 +800,8 @@ class CPU8086 {
                         // DOS 功能 4Ch：程序结束
                         this.running = false;
                         instructionLength = 2;
-                        this.ip += instructionLength;
+                        // 不增加IP，而是将IP设置为一个非法值，确保程序真正结束
+                        this.ip = 0xffff;
                         this.ip &= 0xffff;
                         return false;
                     }

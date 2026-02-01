@@ -20,19 +20,14 @@ class Assembler {
             return 'code';
         } else if (lowerLine.startsWith('.model') ||
                    lowerLine.startsWith('.stack') ||
-                   lowerLine.startsWith('.end') ||
-                   lowerLine.startsWith('.proc') ||
-                   lowerLine.startsWith('.endp') ||
                    lowerLine.startsWith('.startup') ||
                    lowerLine.startsWith('.exit')) {
             return 'other';
-        } else if (lowerLine.includes(' proc ') ||
-                   lowerLine.endsWith(' proc') ||
-                   lowerLine.includes(' endp ') ||
-                   lowerLine.endsWith(' endp') ||
-                   lowerLine.startsWith('end ')) {
+        } else if (lowerLine.startsWith('.end') || lowerLine.startsWith('end ')) {
+            // end 伪指令（用于指定入口点）
             return 'other';
         }
+        // proc 和 endp 不在这里处理，在第一遍扫描的标签识别逻辑中处理
         return null;
     }
 
@@ -115,50 +110,70 @@ class Assembler {
                 continue;
             }
 
-            // 检查是否是标签
+            // 检查是否是冒号标签（如 "label:"）
             if (line.endsWith(':')) {
                 const label = line.slice(0, -1).trim();
                 this.symbols[label] = address;
-            } else if (line.toLowerCase().includes('db')) {
-                // 检查DB指令前面是否有标签（如 "msg DB 'Hello'"）
-                const dbIndex = line.toLowerCase().indexOf('db');
-                if (dbIndex > 0) {
-                    const potentialLabel = line.substring(0, dbIndex).trim();
-                    // 如果不是空字符串且不是注释，则作为标签
-                    if (potentialLabel && !potentialLabel.startsWith(';')) {
-                        this.symbols[potentialLabel] = address;
-                    }
+                continue;
+            }
+
+            // 检查是否是 DB 数据定义
+            const dbIndex = line.toLowerCase().indexOf(' db ');
+            if (dbIndex !== -1 && dbIndex > 0) {
+                // 格式：label DB expr1, expr2, ...
+                const potentialLabel = line.substring(0, dbIndex).trim();
+                if (potentialLabel && !potentialLabel.startsWith(';')) {
+                    this.symbols[potentialLabel] = address;
                 }
 
-                // 处理 DB 数据定义
-                const dataPart = line.substring(dbIndex + 2).trim();
+                const dataPart = line.substring(dbIndex + 4).trim();
                 const data = this.parseDB(dataPart);
 
-                // 无论在哪个段，DB 数据都占用地址（用于标签引用）
                 address += data.length;
-            } else if (line.toLowerCase().includes('dw')) {
-                // 检查DW指令前面是否有标签（如 "num DW 1234h"）
-                const dwIndex = line.toLowerCase().indexOf('dw');
-                if (dwIndex > 0) {
-                    const potentialLabel = line.substring(0, dwIndex).trim();
-                    // 如果不是空字符串且不是注释，则作为标签
-                    if (potentialLabel && !potentialLabel.startsWith(';')) {
-                        this.symbols[potentialLabel] = address;
-                    }
+                continue;
+            }
+
+            // 检查是否是 DW 数据定义
+            const dwIndex = line.toLowerCase().indexOf(' dw ');
+            if (dwIndex !== -1 && dwIndex > 0) {
+                // 格式：label DW expr1, expr2, ...
+                const potentialLabel = line.substring(0, dwIndex).trim();
+                if (potentialLabel && !potentialLabel.startsWith(';')) {
+                    this.symbols[potentialLabel] = address;
                 }
 
-                // 处理 DW 数据定义
-                const dataPart = line.substring(dwIndex + 2).trim();
+                const dataPart = line.substring(dwIndex + 4).trim();
                 const data = this.parseDW(dataPart);
 
-                // 无论在哪个段，DW 数据都占用地址（用于标签引用）
                 address += data.length;
-            } else {
-                // 估算指令长度（简单实现，实际需要更复杂的计算）
-                address += this.estimateInstructionLength(line);
+                continue;
             }
+
+            // 检查是否是 PROC 伪指令
+            // 支持多种格式：proc_name PROC, proc_name proc, proc_name PROC NEAR, proc_name PROC FAR
+            const procMatch = line.toLowerCase().match(/\bproc\b/i);
+            if (procMatch && procMatch.index > 0) {
+                const procIndex = procMatch.index;
+                // 提取标签名称
+                const potentialLabel = line.substring(0, procIndex).trim();
+                if (potentialLabel && !potentialLabel.startsWith(';')) {
+                    this.symbols[potentialLabel] = address;
+                }
+                // proc伪指令本身不占用空间
+                continue;
+            }
+
+            // 检查是否是 ENDP 伪指令
+            // 支持多种格式：proc_name ENDP, proc_name endp
+            const endpMatch = line.toLowerCase().match(/\bendp\b/i);
+            if (endpMatch) {
+                continue;
+            }
+
+            // 估算指令长度（简单实现，实际需要更复杂的计算）
+            address += this.estimateInstructionLength(line);
         }
-        
+
         // 第二遍：解析指令并生成机器码
         address = 0;
         for (let i = 0; i < lines.length; i++) {
@@ -188,13 +203,26 @@ class Assembler {
                 continue;
             }
 
-            if (line.toLowerCase().includes('db')) {
+            // 跳过 PROC 和 ENDP 伪指令
+            // 只匹配独立的 proc/endp 指令（不在字符串、注释或其他指令中）
+            const parts = line.split(/\s+/).filter(Boolean);
+            const firstWord = parts.length > 0 ? parts[0].toLowerCase() : '';
+            const secondWord = parts.length > 1 ? parts[1].toLowerCase() : '';
+            const isProcLine = firstWord === 'proc' || secondWord === 'proc';
+            const isEndpLine = firstWord === 'endp' || secondWord === 'endp';
+
+            if (isProcLine || isEndpLine) {
+                continue;
+            }
+
+            // 检查是否是 DB 数据定义
+            const dbIndex = line.toLowerCase().indexOf(' db ');
+            if (dbIndex !== -1) {
                 // 处理 DB 数据定义
-                const dbIndex = line.toLowerCase().indexOf('db');
-                const dataPart = line.substring(dbIndex + 2).trim();
+                const dataPart = line.substring(dbIndex + 4).trim();
                 const data = this.parseDB(dataPart);
 
-                // 提取标签名称（如果有）
+                // 提取标签名称
                 let label = '';
                 if (dbIndex > 0) {
                     const potentialLabel = line.substring(0, dbIndex).trim();
@@ -203,24 +231,24 @@ class Assembler {
                     }
                 }
 
-                // 处理 DB 数据定义
-                // 无论是否在 .data 段，都收集 DB 数据（向后兼容没有 .data 的情况）
                 this.dataSegments.push({
                     offset: address,
                     data: data,
                     label: label
                 });
 
-                // 不再立即写入内存，将在初始化阶段使用当前段寄存器值写入
                 address += data.length;
                 continue;
-            } else if (line.toLowerCase().includes('dw')) {
+            }
+
+            // 检查是否是 DW 数据定义
+            const dwIndex = line.toLowerCase().indexOf(' dw ');
+            if (dwIndex !== -1) {
                 // 处理 DW 数据定义
-                const dwIndex = line.toLowerCase().indexOf('dw');
-                const dataPart = line.substring(dwIndex + 2).trim();
+                const dataPart = line.substring(dwIndex + 4).trim();
                 const data = this.parseDW(dataPart);
 
-                // 提取标签名称（如果有）
+                // 提取标签名称
                 let label = '';
                 if (dwIndex > 0) {
                     const potentialLabel = line.substring(0, dwIndex).trim();
@@ -229,15 +257,12 @@ class Assembler {
                     }
                 }
 
-                // 处理 DW 数据定义
-                // 无论是否在 .data 段，都收集 DW 数据（向后兼容没有 .data 的情况）
                 this.dataSegments.push({
                     offset: address,
                     data: data,
                     label: label
                 });
 
-                // 不再立即写入内存，将在初始化阶段使用当前段寄存器值写入
                 address += data.length;
                 continue;
             }
@@ -328,7 +353,7 @@ class Assembler {
         const result = [];
         // 移除注释
         const dataWithoutComment = dataPart.split(';')[0].trim();
-        
+
         // 正确分割多个值（用逗号分隔，但忽略字符串中的逗号）
         const values = [];
         let currentValue = '';
@@ -466,9 +491,13 @@ class Assembler {
         const opcode = opcodeEndIndex === -1 ? lineWithoutComment.toLowerCase() : lineWithoutComment.substring(0, opcodeEndIndex).toLowerCase();
         // 提取操作数，移除逗号并分割
         const operandsPart = opcodeEndIndex === -1 ? '' : lineWithoutComment.substring(opcodeEndIndex).trim();
-        const operands = operandsPart.split(/[,\s]+/).filter(Boolean).map(op => op.toLowerCase());
+
+        // 处理 offset 操作符：将 "offset label" 转换为 "label"
+        const operandsPartProcessed = operandsPart.replace(/\boffset\s+/gi, '');
+
+        const operands = operandsPartProcessed.split(/[,\s]+/).filter(Boolean).map(op => op.toLowerCase());
         // 提取原始操作数（不转换为小写），用于标签匹配
-        const originalOperands = operandsPart.split(/[,\s]+/).filter(Boolean);
+        const originalOperands = operandsPartProcessed.split(/[,\s]+/).filter(Boolean);
 
         switch (opcode) {
             case 'nop':
