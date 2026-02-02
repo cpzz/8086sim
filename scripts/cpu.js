@@ -956,6 +956,40 @@ class CPU8086 {
                 this.flags.pf = (parityDec % 2 === 0) ? 1 : 0;
                 instructionLength = 1;
                 break;
+            case 0xf8: // CLC
+                this.flags.cf = 0;
+                instructionLength = 1;
+                break;
+            case 0xf9: // STC
+                this.flags.cf = 1;
+                instructionLength = 1;
+                break;
+            case 0xfc: // CLD
+                this.flags.df = 0;
+                instructionLength = 1;
+                break;
+            case 0xfd: // STD
+                this.flags.df = 1;
+                instructionLength = 1;
+                break;
+            case 0xa8: // TEST AL, Ib
+                {
+                    const imm = this.readMemory8(currentAddress + 1);
+                    const al = this.getRegister('ax') & 0xff;
+                    const r = al & imm;
+                    this.updateFlags8(r, al, imm, 'and'); // 只更新标志位
+                    instructionLength = 2;
+                }
+                break;
+            case 0xa9: // TEST AX, Iv
+                {
+                    const imm = this.readMemory16(currentAddress + 1);
+                    const ax = this.getRegister('ax');
+                    const r = ax & imm;
+                    this.updateFlags16(r, ax, imm, 'and');
+                    instructionLength = 3;
+                }
+                break;
             case 0xd0: // SHL/SHR r/m8, 1
                 const modrm8 = this.readMemory8(currentAddress + 1);
                 const reg8 = (modrm8 >> 3) & 0x7; // 4=SHL, 5=SHR
@@ -1057,6 +1091,208 @@ class CPU8086 {
                     return false;
                 }
                 break;
+            case 0xf6: { // Group 3 r/m8
+                const modrm = this.readMemory8(currentAddress + 1);
+                const reg = (modrm >> 3) & 0x7;
+                const mod = (modrm >> 6) & 0x3;
+                const rm  = modrm & 0x7;
+                if (mod !== 3) {
+                    console.error(`执行错误: 不支持的寻址模式 mod=${mod}`);
+                    this.running = false;
+                    return false;
+                }
+                const regToName8 = ['ax','cx','dx','bx','ax','cx','dx','bx'];
+                const isHigh     = [false,false,false,false,true,true,true,true];
+                const base = regToName8[rm];
+                let full = this.getRegister(base);
+                let op8  = isHigh[rm] ? ((full >> 8) & 0xff) : (full & 0xff);
+
+                switch (reg) {
+                    case 2: { // NOT
+                        const r = (~op8) & 0xff;
+                        full = isHigh[rm] ? ((full & 0x00ff) | (r << 8))
+                                           : ((full & 0xff00) | r);
+                        this.setRegister(base, full);
+                        instructionLength = 2;
+                        break;
+                    }
+                    case 3: { // NEG
+                        const r = (-op8) & 0xff;
+                        full = isHigh[rm] ? ((full & 0x00ff) | (r << 8))
+                                           : ((full & 0xff00) | r);
+                        this.setRegister(base, full);
+                        this.updateFlags8(r, 0, op8, 'sub');
+                        this.flags.cf = op8 !== 0 ? 1 : 0;
+                        instructionLength = 2;
+                        break;
+                    }
+                    case 4: { // MUL (AL * r/m8 -> AX)
+                        const al = this.getRegister('ax') & 0xff;
+                        const prod = al * op8;
+                        const ax = prod & 0xffff;
+                        this.setRegister('ax', ax);
+                        const ah = (ax >> 8) & 0xff;
+                        this.flags.cf = this.flags.of = ah !== 0 ? 1 : 0;
+                        instructionLength = 2;
+                        break;
+                    }
+                    case 5: { // IMUL
+                        let al = this.getRegister('ax') & 0xff;
+                        let b  = op8;
+                        if (al & 0x80) al -= 0x100;
+                        if (b  & 0x80) b  -= 0x100;
+                        const prod = al * b;
+                        this.setRegister('ax', prod & 0xffff);
+                        this.flags.cf = this.flags.of = (prod < -128 || prod > 127) ? 1 : 0;
+                        instructionLength = 2;
+                        break;
+                    }
+                    case 6: { // DIV
+                        const ax = this.getRegister('ax') & 0xffff;
+                        const d  = op8;
+                        if (d === 0 || Math.floor(ax / d) > 0xff) {
+                            console.error('执行错误: DIV 除法错误');
+                            this.running = false;
+                            return false;
+                        }
+                        const q = Math.floor(ax / d) & 0xff;
+                        const r = (ax % d) & 0xff;
+                        this.setRegister('ax', (r << 8) | q);
+                        instructionLength = 2;
+                        break;
+                    }
+                    case 7: { // IDIV
+                        let ax = this.getRegister('ax') & 0xffff;
+                        if (ax & 0x8000) ax -= 0x10000;
+                        let d = op8;
+                        if (d & 0x80) d -= 0x100;
+                        if (d === 0) {
+                            console.error('执行错误: IDIV 被0除');
+                            this.running = false;
+                            return false;
+                        }
+                        const q = (ax / d) | 0;
+                        if (q < -128 || q > 127) {
+                            console.error('执行错误: IDIV 商溢出');
+                            this.running = false;
+                            return false;
+                        }
+                        const r = ax - q * d;
+                        const al = q & 0xff;
+                        const ah = r & 0xff;
+                        this.setRegister('ax', (ah << 8) | al);
+                        instructionLength = 2;
+                        break;
+                    }
+                    default:
+                        console.error(`执行错误: 不支持的0xF6扩展操作码 ${reg}`);
+                        this.running = false;
+                        return false;
+                }
+                break;
+            }
+            case 0xf7: { // Group 3 r/m16
+                const modrm = this.readMemory8(currentAddress + 1);
+                const reg = (modrm >> 3) & 0x7;
+                const mod = (modrm >> 6) & 0x3;
+                const rm  = modrm & 0x7;
+                if (mod !== 3) {
+                    console.error(`执行错误: 不支持的寻址模式 mod=${mod}`);
+                    this.running = false;
+                    return false;
+                }
+                const rmToName = ['ax','cx','dx','bx','sp','bp','si','di'];
+                const base = rmToName[rm];
+                let op16 = this.getRegister(base);
+
+                switch (reg) {
+                    case 2: { // NOT
+                        const r = (~op16) & 0xffff;
+                        this.setRegister(base, r);
+                        instructionLength = 2;
+                        break;
+                    }
+                    case 3: { // NEG
+                        const r = (-op16) & 0xffff;
+                        this.setRegister(base, r);
+                        this.updateFlags16(r, 0, op16, 'sub');
+                        this.flags.cf = op16 !== 0 ? 1 : 0;
+                        instructionLength = 2;
+                        break;
+                    }
+                    case 4: { // MUL (AX * r/m16 -> DX:AX)
+                        const ax = this.getRegister('ax') & 0xffff;
+                        const prod = ax * (op16 & 0xffff);
+                        const axr = prod & 0xffff;
+                        const dxr = (prod >>> 16) & 0xffff;
+                        this.setRegister('ax', axr);
+                        this.setRegister('dx', dxr);
+                        this.flags.cf = this.flags.of = dxr !== 0 ? 1 : 0;
+                        instructionLength = 2;
+                        break;
+                    }
+                    case 5: { // IMUL
+                        let ax = this.getRegister('ax');
+                        let b  = op16;
+                        if (ax & 0x8000) ax -= 0x10000;
+                        if (b  & 0x8000) b  -= 0x10000;
+                        const prod = ax * b;
+                        const axr = prod & 0xffff;
+                        const dxr = (prod >> 16) & 0xffff;
+                        this.setRegister('ax', axr);
+                        this.setRegister('dx', dxr);
+                        this.flags.cf = this.flags.of = (prod < -32768 || prod > 32767) ? 1 : 0;
+                        instructionLength = 2;
+                        break;
+                    }
+                    case 6: { // DIV (DX:AX / r/m16)
+                        const ax = this.getRegister('ax') & 0xffff;
+                        const dx = this.getRegister('dx') & 0xffff;
+                        const dividend = (dx << 16) | ax;
+                        const d = op16 & 0xffff;
+                        if (d === 0 || Math.floor(dividend / d) > 0xffff) {
+                            console.error('执行错误: DIV 除法错误');
+                            this.running = false;
+                            return false;
+                        }
+                        const q = Math.floor(dividend / d) & 0xffff;
+                        const r = dividend % d;
+                        this.setRegister('ax', q);
+                        this.setRegister('dx', r & 0xffff);
+                        instructionLength = 2;
+                        break;
+                    }
+                    case 7: { // IDIV (有符号 DX:AX / r/m16)
+                        let ax = this.getRegister('ax') & 0xffff;
+                        let dx = this.getRegister('dx') & 0xffff;
+                        let dividend = (dx << 16) | ax;
+                        if (dx & 0x8000) dividend -= 0x100000000;
+                        let d = op16 & 0xffff;
+                        if (d & 0x8000) d -= 0x10000;
+                        if (d === 0) {
+                            console.error('执行错误: IDIV 被0除');
+                            this.running = false;
+                            return false;
+                        }
+                        const q = (dividend / d) | 0;
+                        if (q < -32768 || q > 32767) {
+                            console.error('执行错误: IDIV 商溢出');
+                            this.running = false;
+                            return false;
+                        }
+                        const r = dividend - q * d;
+                        this.setRegister('ax', q & 0xffff);
+                        this.setRegister('dx', r & 0xffff);
+                        instructionLength = 2;
+                        break;
+                    }
+                    default:
+                        console.error(`执行错误: 不支持的0xF7扩展操作码 ${reg}`);
+                        this.running = false;
+                        return false;
+                }
+                break;
+            }
             case 0x50: // PUSH AX
                 this.setRegister('sp', this.getRegister('sp') - 2);
                 const stackAddress = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
@@ -1105,6 +1341,141 @@ class CPU8086 {
                 this.setRegister('sp', this.getRegister('sp') + 2);
                 instructionLength = 1;
                 break;
+            case 0xa4: { // MOVSB
+                const ds = this.getSegmentRegister('ds');
+                const es = this.getSegmentRegister('es');
+                const si = this.getRegister('si');
+                const di = this.getRegister('di');
+                const src = this.getMemoryAddress(ds, si);
+                const dst = this.getMemoryAddress(es, di);
+                const value = this.readMemory8(src);
+                this.writeMemory8(dst, value);
+                const delta = this.flags.df ? -1 : 1;
+                this.setRegister('si', (si + delta) & 0xffff);
+                this.setRegister('di', (di + delta) & 0xffff);
+                instructionLength = 1;
+                break;
+            }
+            case 0xa5: { // MOVSW
+                const ds = this.getSegmentRegister('ds');
+                const es = this.getSegmentRegister('es');
+                const si = this.getRegister('si');
+                const di = this.getRegister('di');
+                const src = this.getMemoryAddress(ds, si);
+                const dst = this.getMemoryAddress(es, di);
+                const value = this.readMemory16(src);
+                this.writeMemory16(dst, value);
+                const delta = this.flags.df ? -2 : 2;
+                this.setRegister('si', (si + delta) & 0xffff);
+                this.setRegister('di', (di + delta) & 0xffff);
+                instructionLength = 1;
+                break;
+            }
+            case 0xaa: { // STOSB
+                const es = this.getSegmentRegister('es');
+                const di = this.getRegister('di');
+                const dst = this.getMemoryAddress(es, di);
+                const al = this.getRegister('ax') & 0xff;
+                this.writeMemory8(dst, al);
+                const delta = this.flags.df ? -1 : 1;
+                this.setRegister('di', (di + delta) & 0xffff);
+                instructionLength = 1;
+                break;
+            }
+            case 0xab: { // STOSW
+                const es = this.getSegmentRegister('es');
+                const di = this.getRegister('di');
+                const dst = this.getMemoryAddress(es, di);
+                const ax = this.getRegister('ax');
+                this.writeMemory16(dst, ax);
+                const delta = this.flags.df ? -2 : 2;
+                this.setRegister('di', (di + delta) & 0xffff);
+                instructionLength = 1;
+                break;
+            }
+            case 0xac: { // LODSB
+                const ds = this.getSegmentRegister('ds');
+                const si = this.getRegister('si');
+                const src = this.getMemoryAddress(ds, si);
+                const value = this.readMemory8(src);
+                const ax = this.getRegister('ax');
+                this.setRegister('ax', (ax & 0xff00) | value);
+                const delta = this.flags.df ? -1 : 1;
+                this.setRegister('si', (si + delta) & 0xffff);
+                instructionLength = 1;
+                break;
+            }
+            case 0xad: { // LODSW
+                const ds = this.getSegmentRegister('ds');
+                const si = this.getRegister('si');
+                const src = this.getMemoryAddress(ds, si);
+                const value = this.readMemory16(src);
+                this.setRegister('ax', value);
+                const delta = this.flags.df ? -2 : 2;
+                this.setRegister('si', (si + delta) & 0xffff);
+                instructionLength = 1;
+                break;
+            }
+            case 0xae: { // SCASB
+                const es = this.getSegmentRegister('es');
+                const di = this.getRegister('di');
+                const dst = this.getMemoryAddress(es, di);
+                const mem = this.readMemory8(dst);
+                const al = this.getRegister('ax') & 0xff;
+                const result = al - mem;
+                this.updateFlags8(result, al, mem, 'sub');
+                const delta = this.flags.df ? -1 : 1;
+                this.setRegister('di', (di + delta) & 0xffff);
+                instructionLength = 1;
+                break;
+            }
+            case 0xaf: { // SCASW
+                const es = this.getSegmentRegister('es');
+                const di = this.getRegister('di');
+                const dst = this.getMemoryAddress(es, di);
+                const mem = this.readMemory16(dst);
+                const ax = this.getRegister('ax');
+                const result = ax - mem;
+                this.updateFlags16(result, ax, mem, 'sub');
+                const delta = this.flags.df ? -2 : 2;
+                this.setRegister('di', (di + delta) & 0xffff);
+                instructionLength = 1;
+                break;
+            }
+            case 0xa6: { // CMPSB
+                const ds = this.getSegmentRegister('ds');
+                const es = this.getSegmentRegister('es');
+                const si = this.getRegister('si');
+                const di = this.getRegister('di');
+                const src = this.getMemoryAddress(ds, si);
+                const dst = this.getMemoryAddress(es, di);
+                const left = this.readMemory8(src);
+                const right = this.readMemory8(dst);
+                const result = left - right;
+                this.updateFlags8(result, left, right, 'sub');
+                const delta = this.flags.df ? -1 : 1;
+                this.setRegister('si', (si + delta) & 0xffff);
+                this.setRegister('di', (di + delta) & 0xffff);
+                instructionLength = 1;
+                break;
+            }
+            case 0xa7: { // CMPSW
+                const ds = this.getSegmentRegister('ds');
+                const es = this.getSegmentRegister('es');
+                const si = this.getRegister('si');
+                const di = this.getRegister('di');
+                const src = this.getMemoryAddress(ds, si);
+                const dst = this.getMemoryAddress(es, di);
+                const left = this.readMemory16(src);
+                const right = this.readMemory16(dst);
+                const result = left - right;
+                this.updateFlags16(result, left, right, 'sub');
+                const delta = this.flags.df ? -2 : 2;
+                this.setRegister('si', (si + delta) & 0xffff);
+                this.setRegister('di', (di + delta) & 0xffff);
+                instructionLength = 1;
+                break;
+            }
             case 0xE8: // CALL rel16 (近调用)
                 const offset16 = this.readMemory16(currentAddress + 1);
                 // 符号扩展
@@ -1118,6 +1489,126 @@ class CPU8086 {
                 this.ip = this.ip + 3 + signedOffsetCall;
                 this.ip &= 0xffff;
                 instructionLength = 0; // 不增加IP，因为已经手动设置了
+                break;
+            case 0x70: // JO short
+                {
+                    const off = this.readMemory8(currentAddress + 1);
+                    const s = off > 0x7f ? off - 0x100 : off;
+                    if (this.flags.of) {
+                        this.ip = (this.ip + 2 + s) & 0xffff;
+                        instructionLength = 0;
+                    } else {
+                        instructionLength = 2;
+                    }
+                }
+                break;
+            case 0x71: // JNO short
+                {
+                    const off = this.readMemory8(currentAddress + 1);
+                    const s = off > 0x7f ? off - 0x100 : off;
+                    if (!this.flags.of) {
+                        this.ip = (this.ip + 2 + s) & 0xffff;
+                        instructionLength = 0;
+                    } else {
+                        instructionLength = 2;
+                    }
+                }
+                break;
+            case 0x72: // JB/JNAE/JC short
+                {
+                    const off = this.readMemory8(currentAddress + 1);
+                    const s = off > 0x7f ? off - 0x100 : off;
+                    if (this.flags.cf) {
+                        this.ip = (this.ip + 2 + s) & 0xffff;
+                        instructionLength = 0;
+                    } else {
+                        instructionLength = 2;
+                    }
+                }
+                break;
+            case 0x73: // JNB/JAE/JNC short
+                {
+                    const off = this.readMemory8(currentAddress + 1);
+                    const s = off > 0x7f ? off - 0x100 : off;
+                    if (!this.flags.cf) {
+                        this.ip = (this.ip + 2 + s) & 0xffff;
+                        instructionLength = 0;
+                    } else {
+                        instructionLength = 2;
+                    }
+                }
+                break;
+            case 0x76: // JBE/JNA short
+                {
+                    const off = this.readMemory8(currentAddress + 1);
+                    const s = off > 0x7f ? off - 0x100 : off;
+                    if (this.flags.cf || this.flags.zf) {
+                        this.ip = (this.ip + 2 + s) & 0xffff;
+                        instructionLength = 0;
+                    } else {
+                        instructionLength = 2;
+                    }
+                }
+                break;
+            case 0x77: // JA/JNBE short
+                {
+                    const off = this.readMemory8(currentAddress + 1);
+                    const s = off > 0x7f ? off - 0x100 : off;
+                    if (!this.flags.cf && !this.flags.zf) {
+                        this.ip = (this.ip + 2 + s) & 0xffff;
+                        instructionLength = 0;
+                    } else {
+                        instructionLength = 2;
+                    }
+                }
+                break;
+            case 0x78: // JS short
+                {
+                    const off = this.readMemory8(currentAddress + 1);
+                    const s = off > 0x7f ? off - 0x100 : off;
+                    if (this.flags.sf) {
+                        this.ip = (this.ip + 2 + s) & 0xffff;
+                        instructionLength = 0;
+                    } else {
+                        instructionLength = 2;
+                    }
+                }
+                break;
+            case 0x79: // JNS short
+                {
+                    const off = this.readMemory8(currentAddress + 1);
+                    const s = off > 0x7f ? off - 0x100 : off;
+                    if (!this.flags.sf) {
+                        this.ip = (this.ip + 2 + s) & 0xffff;
+                        instructionLength = 0;
+                    } else {
+                        instructionLength = 2;
+                    }
+                }
+                break;
+            case 0x7a: // JP/JPE short
+                {
+                    const off = this.readMemory8(currentAddress + 1);
+                    const s = off > 0x7f ? off - 0x100 : off;
+                    if (this.flags.pf) {
+                        this.ip = (this.ip + 2 + s) & 0xffff;
+                        instructionLength = 0;
+                    } else {
+                        instructionLength = 2;
+                    }
+                }
+                break;
+            case 0x7b: // JNP/JPO short
+                {
+                    const off = this.readMemory8(currentAddress + 1);
+                    const s = off > 0x7f ? off - 0x100 : off;
+                    if (!this.flags.pf) {
+                        this.ip = (this.ip + 2 + s) & 0xffff;
+                        instructionLength = 0;
+                    } else {
+                        instructionLength = 2;
+                    }
+                }
                 break;
             case 0x3c: // CMP AL, Ib
                 const imm8cmp = this.readMemory8(currentAddress + 1);
@@ -1203,6 +1694,63 @@ class CPU8086 {
                     console.error(`执行错误: 不支持的寻址模式 mod=${mod39}`);
                     this.running = false;
                     return false;
+                }
+                break;
+            case 0xe0: // LOOPNZ/LOOPNE short
+                {
+                    const off = this.readMemory8(currentAddress + 1);
+                    const s = off > 0x7f ? off - 0x100 : off;
+                    const cx = this.getRegister('cx');
+                    const newCx = (cx - 1) & 0xffff;
+                    this.setRegister('cx', newCx);
+                    if (newCx !== 0 && this.flags.zf === 0) {
+                        this.ip = (this.ip + 2 + s) & 0xffff;
+                        instructionLength = 0;
+                    } else {
+                        instructionLength = 2;
+                    }
+                }
+                break;
+            case 0xe1: // LOOPZ/LOOPE short
+                {
+                    const off = this.readMemory8(currentAddress + 1);
+                    const s = off > 0x7f ? off - 0x100 : off;
+                    const cx = this.getRegister('cx');
+                    const newCx = (cx - 1) & 0xffff;
+                    this.setRegister('cx', newCx);
+                    if (newCx !== 0 && this.flags.zf === 1) {
+                        this.ip = (this.ip + 2 + s) & 0xffff;
+                        instructionLength = 0;
+                    } else {
+                        instructionLength = 2;
+                    }
+                }
+                break;
+            case 0xe2: // LOOP short
+                {
+                    const off = this.readMemory8(currentAddress + 1);
+                    const s = off > 0x7f ? off - 0x100 : off;
+                    const cx = this.getRegister('cx');
+                    const newCx = (cx - 1) & 0xffff;
+                    this.setRegister('cx', newCx);
+                    if (newCx !== 0) {
+                        this.ip = (this.ip + 2 + s) & 0xffff;
+                        instructionLength = 0;
+                    } else {
+                        instructionLength = 2;
+                    }
+                }
+                break;
+            case 0xe3: // JCXZ short
+                {
+                    const off = this.readMemory8(currentAddress + 1);
+                    const s = off > 0x7f ? off - 0x100 : off;
+                    if (this.getRegister('cx') === 0) {
+                        this.ip = (this.ip + 2 + s) & 0xffff;
+                        instructionLength = 0;
+                    } else {
+                        instructionLength = 2;
+                    }
                 }
                 break;
             case 0xeb: // JMP short
