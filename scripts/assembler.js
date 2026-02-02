@@ -160,6 +160,36 @@ class Assembler {
                 continue;
             }
 
+            // 检查是否是 DD 数据定义
+            const ddIndex = line.toLowerCase().indexOf(' dd ');
+            if (ddIndex !== -1 && ddIndex > 0) {
+                // 格式：label DD expr1, expr2, ...
+                const potentialLabel = line.substring(0, ddIndex).trim();
+                if (potentialLabel && !potentialLabel.startsWith(';')) {
+                    this.symbols[potentialLabel] = address;
+                }
+
+                const dataPart = line.substring(ddIndex + 4).trim();
+                const data = this.parseDD(dataPart);
+
+                address += data.length;
+                continue;
+            }
+
+            // 检查是否是 EQU 常量定义
+            const equIndex = line.toLowerCase().indexOf(' equ ');
+            if (equIndex !== -1 && equIndex > 0) {
+                // 格式：label EQU value
+                const potentialLabel = line.substring(0, equIndex).trim();
+                if (potentialLabel && !potentialLabel.startsWith(';')) {
+                    const valuePart = line.substring(equIndex + 5).trim();
+                    const value = this.parseImmediate(valuePart);
+                    this.symbols[potentialLabel] = value; // EQU定义的是常量值，不是地址
+                }
+                // EQU不占用空间
+                continue;
+            }
+
             // 检查是否是 PROC 伪指令
             // 支持多种格式：proc_name PROC, proc_name proc, proc_name PROC NEAR, proc_name PROC FAR
             const procMatch = line.toLowerCase().match(/\bproc\b/i);
@@ -276,6 +306,38 @@ class Assembler {
 
                 address += data.length;
                 continue;
+            }
+
+            // 检查是否是 DD 数据定义
+            const ddIndex = line.toLowerCase().indexOf(' dd ');
+            if (ddIndex !== -1) {
+                // 处理 DD 数据定义
+                const dataPart = line.substring(ddIndex + 4).trim();
+                const data = this.parseDD(dataPart);
+
+                // 提取标签名称
+                let label = '';
+                if (ddIndex > 0) {
+                    const potentialLabel = line.substring(0, ddIndex).trim();
+                    if (potentialLabel && !potentialLabel.startsWith(';')) {
+                        label = potentialLabel;
+                    }
+                }
+
+                this.dataSegments.push({
+                    offset: address,
+                    data: data,
+                    label: label
+                });
+
+                address += data.length;
+                continue;
+            }
+
+            // 检查是否是 EQU 常量定义（第二遍跳过，已在第一遍处理）
+            const equIndex = line.toLowerCase().indexOf(' equ ');
+            if (equIndex !== -1 && equIndex > 0) {
+                continue; // EQU已在第一遍处理，不占用空间
             }
 
             // 解析指令
@@ -629,7 +691,47 @@ class Assembler {
         }
         return result;
     }
-    
+
+    // 解析 DD 数据定义（双字，4字节）
+    parseDD(dataPart) {
+        const result = [];
+        // 移除注释
+        const dataWithoutComment = dataPart.split(';')[0].trim();
+
+        // 正确分割多个值（用逗号分隔）
+        const values = [];
+        let currentValue = '';
+
+        for (let i = 0; i < dataWithoutComment.length; i++) {
+            const char = dataWithoutComment[i];
+
+            if (char === ',' && !currentValue.includes('"') && !currentValue.includes("'")) {
+                // 分隔符，添加当前值并重置
+                values.push(currentValue.trim());
+                currentValue = '';
+            } else {
+                // 普通字符，添加到当前值
+                currentValue += char;
+            }
+        }
+
+        // 添加最后一个值
+        if (currentValue.trim() !== '') {
+            values.push(currentValue.trim());
+        }
+
+        for (const value of values) {
+            // 立即数（32位）
+            const parsedValue = this.parseImmediate(value);
+            // 小端序，低字节在前
+            result.push(isNaN(parsedValue) ? 0 : (parsedValue & 0xff));
+            result.push(isNaN(parsedValue) ? 0 : ((parsedValue >> 8) & 0xff));
+            result.push(isNaN(parsedValue) ? 0 : ((parsedValue >> 16) & 0xff));
+            result.push(isNaN(parsedValue) ? 0 : ((parsedValue >> 24) & 0xff));
+        }
+        return result;
+    }
+
     // 解析单个指令
     parseInstruction(line, address) {
         const originalLine = line; // 保存原始行
@@ -1177,6 +1279,55 @@ class Assembler {
                         originalLine: originalLine.trim()
                     };
                 }
+
+                // 处理直接内存寻址：MOV CX, [label] - 从内存读取16位到CX
+                if (operands[0] === 'cx' && operands[1].startsWith('[') && operands[1].endsWith(']')) {
+                    const labelName = operands[1].substring(1, operands[1].length - 1).trim();
+                    // 检查是否是标签
+                    let offset = null;
+                    for (const key in this.symbols) {
+                        if (key.toLowerCase() === labelName.toLowerCase()) {
+                            offset = this.symbols[key];
+                            break;
+                        }
+                    }
+                    if (offset !== null) {
+                        // MOV CX, [disp16] - 8B 0E disp16 (小端序)
+                        return {
+                            address,
+                            opcode: 'MOV',
+                            operands: ['CX', operands[1].toUpperCase()],
+                            machineCode: [0x8b, 0x0e, offset & 0xff, (offset >> 8) & 0xff],
+                            length: 4,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                }
+
+                // 处理直接内存寻址：MOV [label], AL - 将AL写入内存
+                if (operands[0].startsWith('[') && operands[0].endsWith(']') && operands[1] === 'al') {
+                    const labelName = operands[0].substring(1, operands[0].length - 1).trim();
+                    // 检查是否是标签
+                    let offset = null;
+                    for (const key in this.symbols) {
+                        if (key.toLowerCase() === labelName.toLowerCase()) {
+                            offset = this.symbols[key];
+                            break;
+                        }
+                    }
+                    if (offset !== null) {
+                        // MOV [disp16], AL - 88 06 disp16 (小端序)
+                        return {
+                            address,
+                            opcode: 'MOV',
+                            operands: [operands[0].toUpperCase(), 'AL'],
+                            machineCode: [0x88, 0x06, offset & 0xff, (offset >> 8) & 0xff],
+                            length: 4,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                }
+
                 // 支持MOV立即数寻址（16位寄存器）
                 if (operands[0] === 'ax' && this.isImmediate(operands[1])) {
                     const imm16 = this.parseImmediate(operands[1]);
@@ -1934,6 +2085,21 @@ class Assembler {
                             originalLine: 'JMP'
                         };
                     }
+                }
+                // 处理 JMP SHORT label 格式
+                if (operands.length === 2 && operands[0] === 'short') {
+                    const targetAddress = this.parseImmediate(operands[1]);
+                    const offset = targetAddress - (address + 2);
+                    // JMP short (EB)
+                    const offset8 = offset & 0xff;
+                    return {
+                        address,
+                        opcode: 'JMP',
+                        operands: ['SHORT', operands[1]],
+                        machineCode: [0xeb, offset8],
+                        length: 2,
+                        originalLine: 'JMP SHORT'
+                    };
                 }
                 break;
             case 'jz':
@@ -3863,13 +4029,16 @@ class Assembler {
     
     // 解析立即数
     parseImmediate(value) {
-        // 检查是否是标签
-        if (this.symbols.hasOwnProperty(value)) {
-            return this.symbols[value];
+        // 检查是否是标签（大小写不敏感）
+        const valueLower = value.toLowerCase();
+        for (const key in this.symbols) {
+            if (key.toLowerCase() === valueLower) {
+                return this.symbols[key];
+            }
         }
 
         // 处理@data符号
-        if (value === '@data') {
+        if (valueLower === '@data') {
             // 在8086汇编中，@data代表数据段的段地址
             // 返回DS段寄存器的默认值（2000h）
             return 0x2000;

@@ -604,7 +604,10 @@ class CPU8086 {
                     this.setRegister(regToName[reg8b], this.getRegister(srcRegToName[rm8b]));
                     instructionLength = 2;
                 } else if (mod8b === 0 && rm8b === 6) {
-                    // [BP] + disp16 (暂时不支持偏移量)
+                    // 直接内存寻址 [disp16] - 从指令中提取16位地址
+                    const disp16 = this.readMemory16(currentAddress + 2);
+                    const address = this.getMemoryAddress(this.getSegmentRegister('ds'), disp16);
+                    this.setRegister(regToName[reg8b], this.readMemory16(address));
                     instructionLength = 4;
                 } else {
                     // 内存到寄存器传送
@@ -712,6 +715,73 @@ class CPU8086 {
                         instructionLength = 2;
                     } else {
                         console.error(`执行错误: 不支持的寻址模式 0x${modrm8a.toString(16)}`);
+                        this.running = false;
+                        return false;
+                    }
+                }
+                break;
+            case 0x88: // MOV Eb, Gb (Gb是源，Eb是目标) - 8位版本
+                const modrm88 = this.readMemory8(currentAddress + 1);
+                const reg88 = (modrm88 >> 3) & 0x7;
+                const rm88 = modrm88 & 0x7;
+                const mod88 = (modrm88 >> 6) & 0x3;
+
+                // 源8位寄存器映射 (reg字段) - 0=AL, 1=CL, 2=DL, 3=BL, 4=AH, 5=CH, 6=DH, 7=BH
+                const srcRegToName88 = ['ax', 'cx', 'dx', 'bx', 'ax', 'cx', 'dx', 'bx'];
+                const srcIsHighByte88 = [false, false, false, false, true, true, true, true];
+
+                // 获取源寄存器的8位值
+                const srcReg88 = srcRegToName88[reg88];
+                const srcValue88 = this.getRegister(srcReg88);
+                const srcByteValue88 = srcIsHighByte88[reg88] ? (srcValue88 >> 8) & 0xff : srcValue88 & 0xff;
+
+                if (mod88 === 3) {
+                    // 寄存器到寄存器传送 (8位)
+                    const dstRegToName88 = ['ax', 'cx', 'dx', 'bx', 'ax', 'cx', 'dx', 'bx'];
+                    const dstIsHighByte88 = [false, false, false, false, true, true, true, true];
+                    const dstReg88 = dstRegToName88[rm88];
+                    const dstValue88 = this.getRegister(dstReg88);
+
+                    if (dstIsHighByte88[rm88]) {
+                        this.setRegister(dstReg88, (dstValue88 & 0x00ff) | (srcByteValue88 << 8));
+                    } else {
+                        this.setRegister(dstReg88, (dstValue88 & 0xff00) | srcByteValue88);
+                    }
+                    instructionLength = 2;
+                } else if (mod88 === 0 && rm88 === 6) {
+                    // 直接寻址模式：MOV m8, r8 - [disp16]
+                    const offset16 = this.readMemory16(currentAddress + 2);
+                    const address = this.getMemoryAddress(this.getSegmentRegister('ds'), offset16);
+                    this.writeMemory8(address, srcByteValue88);
+                    this.memoryOperations.set(address, { type: 'write', value: srcByteValue88 });
+                    instructionLength = 4;
+                } else {
+                    // 寄存器到内存传送 (8位)
+                    let address = null;
+
+                    if (rm88 === 0) {
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + this.getRegister('si'));
+                    } else if (rm88 === 1) {
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + this.getRegister('di'));
+                    } else if (rm88 === 2) {
+                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('si'));
+                    } else if (rm88 === 3) {
+                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('di'));
+                    } else if (rm88 === 4) {
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('si'));
+                    } else if (rm88 === 5) {
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('di'));
+                    } else if (rm88 === 6) {
+                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp'));
+                    } else if (rm88 === 7) {
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx'));
+                    }
+
+                    if (address !== null) {
+                        this.writeMemory8(address, srcByteValue88);
+                        instructionLength = 2;
+                    } else {
+                        console.error(`执行错误: 不支持的寻址模式 0x${modrm88.toString(16)}`);
                         this.running = false;
                         return false;
                     }
@@ -858,6 +928,62 @@ class CPU8086 {
                 break;
             case 0x90: // NOP
                 instructionLength = 1;
+                break;
+            case 0x91: // XCHG AX, CX
+                {
+                    const temp = this.getRegister('ax');
+                    this.setRegister('ax', this.getRegister('cx'));
+                    this.setRegister('cx', temp);
+                    instructionLength = 1;
+                }
+                break;
+            case 0x92: // XCHG AX, DX
+                {
+                    const temp = this.getRegister('ax');
+                    this.setRegister('ax', this.getRegister('dx'));
+                    this.setRegister('dx', temp);
+                    instructionLength = 1;
+                }
+                break;
+            case 0x93: // XCHG AX, BX
+                {
+                    const temp = this.getRegister('ax');
+                    this.setRegister('ax', this.getRegister('bx'));
+                    this.setRegister('bx', temp);
+                    instructionLength = 1;
+                }
+                break;
+            case 0x94: // XCHG AX, SP
+                {
+                    const temp = this.getRegister('ax');
+                    this.setRegister('ax', this.getRegister('sp'));
+                    this.setRegister('sp', temp);
+                    instructionLength = 1;
+                }
+                break;
+            case 0x95: // XCHG AX, BP
+                {
+                    const temp = this.getRegister('ax');
+                    this.setRegister('ax', this.getRegister('bp'));
+                    this.setRegister('bp', temp);
+                    instructionLength = 1;
+                }
+                break;
+            case 0x96: // XCHG AX, SI
+                {
+                    const temp = this.getRegister('ax');
+                    this.setRegister('ax', this.getRegister('si'));
+                    this.setRegister('si', temp);
+                    instructionLength = 1;
+                }
+                break;
+            case 0x97: // XCHG AX, DI
+                {
+                    const temp = this.getRegister('ax');
+                    this.setRegister('ax', this.getRegister('di'));
+                    this.setRegister('di', temp);
+                    instructionLength = 1;
+                }
                 break;
             case 0xc3: // RET
                 const currentSP = this.getRegister('sp');
