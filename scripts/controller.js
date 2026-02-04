@@ -10,6 +10,7 @@ let previousRegisterValues = {}; // 存储上一次的寄存器值
 let hasExecuted = false; // 跟踪是否已经执行了指令
 let isAtEnd = false; // 跟踪是否执行到了最后一条指令
 let currentState = '初始状态'; // 当前状态：初始状态、已加载文件、单步执行、执行中、已暂停、已执行完毕、遇到断点
+let shouldScrollToCurrent = false; // 是否需要在更新显示时滚动到当前行
 let segmentWriteAddresses = { cs: new Set(), ds: new Set(), ss: new Set(), es: new Set() }; // 各段写入的地址集合
 let stackDisplayBase = null; // 堆栈段显示的起始地址（固定后不再改变）
 
@@ -22,8 +23,14 @@ function initSimulator() {
     // 设置CPU的显示输出更新回调
     cpu.updateOutputDisplay = updateDisplayOutput;
 
+    // 设置CPU的键盘输入回调
+    cpu.waitForKeyPress = handleKeyPress;
+
     // 初始化UI
     initUI();
+
+    // 设置键盘事件监听
+    setupKeyboardInput();
 
     // 更新显示
     updateUIDisplay();
@@ -194,6 +201,8 @@ function handleFileLoad(e) {
                     cpu.ip = instructions[0].address;
                 }
                 updateStatusIndicator('已加载文件');
+                // 加载文件后滚动到入口点
+                shouldScrollToCurrent = true;
             }
 
             // 初始化不同段的内存值
@@ -275,6 +284,8 @@ function stepExecution() {
     const success = cpu.step();
     // 设置执行状态
     hasExecuted = true;
+    // 设置滚动标志，执行后需要滚动到当前行
+    shouldScrollToCurrent = true;
     // 检查是否执行到了最后一条指令
     checkIfAtEnd();
     // 查找各段最后一次写入的地址
@@ -326,6 +337,8 @@ function runExecution() {
     cpu.running = false;
     // 设置执行状态
     hasExecuted = true;
+    // 设置滚动标志，执行后需要滚动到当前行
+    shouldScrollToCurrent = true;
     // 查找各段最后一次写入的地址
     segmentWriteAddresses = findSegmentWriteAddresses();
     // 保存寄存器操作跟踪
@@ -368,6 +381,8 @@ function runExecution() {
 function pauseExecution() {
     cpu.pause();
     currentState = '已暂停';
+    // 设置滚动标志，暂停后需要滚动到当前行
+    shouldScrollToCurrent = true;
     // 更新指令列表显示，高亮当前指令
     updateInstructionsDisplay();
 
@@ -496,6 +511,8 @@ function resetSimulator() {
         }
         currentState = '已加载文件';
         updateStatusIndicator('已加载文件');
+        // 重置后滚动到入口点
+        shouldScrollToCurrent = true;
     } else {
         currentState = '初始状态';
         updateStatusIndicator('初始状态');
@@ -900,6 +917,96 @@ function updateInstructionsDisplay() {
     // 获取当前指令地址（IP的值，因为指令的地址是相对于CS的偏移）
     const currentIP = cpu.ip;
 
+    // 首先显示EQU常量定义
+    const equDefinitions = assembler.equDefinitions || [];
+    equDefinitions.forEach(equDef => {
+        const rowElement = document.createElement('div');
+        rowElement.className = 'instructions-table-row equ-definition';
+
+        // 解析原始行，分离汇编代码和注释
+        const originalLine = equDef.originalLine || '';
+        const commentIndex = originalLine.indexOf(';');
+        let assemblyCode = originalLine;
+        let comment = '';
+        if (commentIndex !== -1) {
+            assemblyCode = originalLine.substring(0, commentIndex).trim();
+            comment = originalLine.substring(commentIndex + 1).trim();
+        }
+
+        // 创建地址列（EQU不分配内存，显示为空）
+        const addressCell = document.createElement('div');
+        addressCell.className = 'instructions-table-cell address';
+        addressCell.textContent = '';
+        rowElement.appendChild(addressCell);
+
+        // 创建机器代码列（EQU没有机器码）
+        const machineCodeCell = document.createElement('div');
+        machineCodeCell.className = 'instructions-table-cell machine-code';
+        machineCodeCell.textContent = '';
+        rowElement.appendChild(machineCodeCell);
+
+        // 创建汇编代码列
+        const assemblyCell = document.createElement('div');
+        assemblyCell.className = 'instructions-table-cell assembly';
+        assemblyCell.textContent = assemblyCode;
+        rowElement.appendChild(assemblyCell);
+
+        // 创建注释列
+        const commentCell = document.createElement('div');
+        commentCell.className = 'instructions-table-cell comment';
+        commentCell.textContent = comment;
+        rowElement.appendChild(commentCell);
+
+        instructionsList.appendChild(rowElement);
+    });
+
+    // 显示数据段内容
+    const dataSegments = assembler.dataSegments || [];
+    dataSegments.forEach(dataSegment => {
+        const rowElement = document.createElement('div');
+        rowElement.className = 'instructions-table-row data-segment';
+
+        // 解析原始行，分离汇编代码和注释
+        const originalLine = dataSegment.originalLine || '';
+        const commentIndex = originalLine.indexOf(';');
+        let assemblyCode = originalLine;
+        let comment = '';
+        if (commentIndex !== -1) {
+            assemblyCode = originalLine.substring(0, commentIndex).trim();
+            comment = originalLine.substring(commentIndex + 1).trim();
+        }
+
+        // 构建地址列显示 "DS:XXXXX"
+        const addressStr = 'DS:' + dataSegment.offset.toString(16).toUpperCase().padStart(5, '0');
+
+        // 创建地址列
+        const addressCell = document.createElement('div');
+        addressCell.className = 'instructions-table-cell address';
+        addressCell.textContent = addressStr;
+        rowElement.appendChild(addressCell);
+
+        // 创建机器代码列（数据段显示为空）
+        const machineCodeCell = document.createElement('div');
+        machineCodeCell.className = 'instructions-table-cell machine-code';
+        machineCodeCell.textContent = '';
+        rowElement.appendChild(machineCodeCell);
+
+        // 创建汇编代码列
+        const assemblyCell = document.createElement('div');
+        assemblyCell.className = 'instructions-table-cell assembly';
+        assemblyCell.textContent = assemblyCode;
+        rowElement.appendChild(assemblyCell);
+
+        // 创建注释列
+        const commentCell = document.createElement('div');
+        commentCell.className = 'instructions-table-cell comment';
+        commentCell.textContent = comment;
+        rowElement.appendChild(commentCell);
+
+        instructionsList.appendChild(rowElement);
+    });
+
+    // 显示代码段指令
     instructions.forEach(instruction => {
         const rowElement = document.createElement('div');
         rowElement.className = 'instructions-table-row';
@@ -924,8 +1031,8 @@ function updateInstructionsDisplay() {
             comment = originalLine.substring(commentIndex + 1).trim();
         }
 
-        // 构建各列
-        const addressStr = instruction.address.toString(16).toUpperCase().padStart(5, '0');
+        // 构建地址列显示 "CS:XXXXX"
+        const addressStr = 'CS:' + instruction.address.toString(16).toUpperCase().padStart(5, '0');
         const machineCodeStr = instruction.machineCode.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
 
         // 创建地址列
@@ -967,25 +1074,94 @@ function updateInstructionsDisplay() {
         instructionsList.appendChild(rowElement);
     });
     
-    // 自动滚动到当前指令行
-    const currentInstructionRow = instructionsList.querySelector('.instructions-table-row.current');
-    if (currentInstructionRow) {
-        // 获取所有指令行元素
-        const allInstructionRows = instructionsList.querySelectorAll('.instructions-table-row');
-        
-        // 获取当前行在所有行中的索引
-        const currentIndex = Array.from(allInstructionRows).indexOf(currentInstructionRow);
-        
-        // 计算可见行数（基于容器高度和行高）
-        const rowHeight = currentInstructionRow.offsetHeight;
-        const containerHeight = instructionsList.clientHeight;
-        const visibleLines = Math.max(1, Math.floor(containerHeight / rowHeight));
-        const middleLineIndex = Math.floor(visibleLines / 2);
-        
-        // 计算滚动到使当前行在中间的位置
-        const scrollTo = Math.max(0, (currentIndex - middleLineIndex) * rowHeight);
-        instructionsList.scrollTop = scrollTo;
+    // 只有在执行后才自动滚动到当前指令行
+    if (shouldScrollToCurrent) {
+        const currentInstructionRow = instructionsList.querySelector('.instructions-table-row.current');
+        if (currentInstructionRow) {
+            // 获取所有指令行元素
+            const allInstructionRows = instructionsList.querySelectorAll('.instructions-table-row');
+            
+            // 获取当前行在所有行中的索引
+            const currentIndex = Array.from(allInstructionRows).indexOf(currentInstructionRow);
+            
+            // 计算可见行数（基于容器高度和行高）
+            const rowHeight = currentInstructionRow.offsetHeight;
+            const containerHeight = instructionsList.clientHeight;
+            const visibleLines = Math.max(1, Math.floor(containerHeight / rowHeight));
+            const middleLineIndex = Math.floor(visibleLines / 2);
+            
+            // 计算滚动到使当前行在中间的位置
+            const scrollTo = Math.max(0, (currentIndex - middleLineIndex) * rowHeight);
+            instructionsList.scrollTop = scrollTo;
+        }
+        // 重置标志
+        shouldScrollToCurrent = false;
     }
+}
+
+// 键盘输入处理
+let keyPressCallback = null;
+let isWaitingForKey = false;
+
+// 设置键盘输入监听
+function setupKeyboardInput() {
+    // 只监听keydown事件
+    document.addEventListener('keydown', (e) => {
+        // 如果正在等待键盘输入
+        if (isWaitingForKey && keyPressCallback) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            // 获取按键的ASCII码
+            let charCode;
+            if (e.key.length === 1) {
+                // 可打印字符，使用charCodeAt获取ASCII码
+                charCode = e.key.charCodeAt(0);
+            } else {
+                // 特殊键（如Enter、Esc等），使用keyCode
+                charCode = e.keyCode;
+            }
+            
+            // 确保是8位值
+            charCode = charCode & 0xFF;
+            
+            console.log('Key pressed:', e.key, 'charCode:', charCode);
+            
+            // 调用回调
+            const callback = keyPressCallback;
+            keyPressCallback = null;
+            isWaitingForKey = false;
+            
+            // 处理回车键：自动添加换行符（CR+LF）
+            if (charCode === 0x0D) {
+                // 先发送回车符
+                callback(0x0D);
+                // 再发送换行符
+                setTimeout(() => {
+                    if (cpu.outputBuffer !== undefined) {
+                        cpu.outputBuffer += '\n';
+                        if (cpu.updateOutputDisplay) {
+                            cpu.updateOutputDisplay();
+                        }
+                    }
+                }, 0);
+            } else {
+                callback(charCode);
+            }
+        }
+    }, true);
+}
+
+// 处理键盘输入请求
+function handleKeyPress(callback) {
+    keyPressCallback = callback;
+    isWaitingForKey = true;
+    // 更新状态指示器
+    updateStatusIndicator('等待键盘输入');
+    // 设置焦点到文档，确保能接收键盘事件
+    window.focus();
+    document.body.focus();
+    console.log('Waiting for keyboard input...');
 }
 
 // 页面加载完成后初始化

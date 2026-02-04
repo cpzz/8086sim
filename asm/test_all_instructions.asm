@@ -164,8 +164,8 @@ not_equal_label:
     ; LOOP指令测试
     MOV CX, 5                    ; CX = 0005h
 loop_test:
-    DEC CX                       ; CX减1
-    LOOP loop_test               ; CX≠0则循环，最终CX=0
+    NOP                          ; 空操作
+    LOOP loop_test               ; CX减1，CX≠0则循环，最终CX=0
     
     ; ==================== 串操作指令测试 ====================
     

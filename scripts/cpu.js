@@ -54,8 +54,17 @@ class CPU8086 {
         // 显示输出缓冲区
         this.outputBuffer = '';
 
+        // 键盘输入缓冲区
+        this.keyboardBuffer = [];
+
+        // 键盘输入等待标志
+        this.waitingForKey = false;
+
         // 更新显示控制的回调函数
         this.updateOutputDisplay = null;
+
+        // 键盘输入回调函数
+        this.waitForKeyPress = null;
     }
     
     // 获取寄存器值（16位）
@@ -247,7 +256,11 @@ class CPU8086 {
         
         // 清除内存操作跟踪
         this.clearMemoryOperations();
-        
+
+        // 重置键盘输入状态
+        this.keyboardBuffer = [];
+        this.waitingForKey = false;
+
         // 停止运行
         this.running = false;
         this.currentInstruction = null;
@@ -289,6 +302,49 @@ class CPU8086 {
                 this.setRegister('ax', result16 & 0xffff);
                 // 设置标志位
                 this.updateFlags16(result16, ax, imm16);
+                instructionLength = 3;
+                break;
+            case 0x13: // ADC Gv, Ev (ADC r16, r/m16)
+                const modrm13 = this.readMemory8(currentAddress + 1);
+                const reg13 = (modrm13 >> 3) & 0x7;
+                const mod13 = (modrm13 >> 6) & 0x3;
+                const rm13 = modrm13 & 0x7;
+
+                // 寄存器映射
+                const regToName13 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+                const rmToName13 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+
+                if (mod13 === 3) {
+                    // 寄存器到寄存器 ADC
+                    const srcValue13 = this.getRegister(rmToName13[rm13]);
+                    const dstValue13 = this.getRegister(regToName13[reg13]);
+                    const result13 = dstValue13 + srcValue13 + this.flags.cf;
+                    this.setRegister(regToName13[reg13], result13 & 0xffff);
+                    // 设置标志位
+                    this.updateFlags16(result13, dstValue13, srcValue13 + this.flags.cf, 'add');
+                    instructionLength = 2;
+                } else {
+                    console.error(`执行错误: 不支持的寻址模式 mod=${mod13}`);
+                    this.running = false;
+                    return false;
+                }
+                break;
+            case 0x14: // ADC AL, Ib
+                const imm8adc = this.readMemory8(currentAddress + 1);
+                const aladc = this.getRegister('ax') & 0xff;
+                const result8adc = aladc + imm8adc + this.flags.cf;
+                this.setRegister('ax', (this.getRegister('ax') & 0xff00) | (result8adc & 0xff));
+                // 设置标志位
+                this.updateFlags8(result8adc, aladc, imm8adc + this.flags.cf, 'add');
+                instructionLength = 2;
+                break;
+            case 0x15: // ADC AX, Iv
+                const imm16adc = this.readMemory16(currentAddress + 1);
+                const axadc = this.getRegister('ax');
+                const result16adc = axadc + imm16adc + this.flags.cf;
+                this.setRegister('ax', result16adc & 0xffff);
+                // 设置标志位
+                this.updateFlags16(result16adc, axadc, imm16adc + this.flags.cf, 'add');
                 instructionLength = 3;
                 break;
             case 0x19: // SBB r/m16, r16
@@ -341,12 +397,36 @@ class CPU8086 {
                     return false;
                 }
                 break;
+            case 0x1c: // SBB AL, Ib
+                const imm8sbb = this.readMemory8(currentAddress + 1);
+                const alsbb = this.getRegister('ax') & 0xff;
+                const carry1c = this.flags.cf;
+                const result8sbb = alsbb - imm8sbb - carry1c;
+                this.setRegister('ax', (this.getRegister('ax') & 0xff00) | (result8sbb & 0xff));
+                // 设置标志位
+                this.updateFlags8(result8sbb, alsbb, imm8sbb + carry1c, 'sub');
+                instructionLength = 2;
+                break;
+            case 0x1d: // SBB AX, Iv
+                const imm16sbb = this.readMemory16(currentAddress + 1);
+                const axsbb = this.getRegister('ax');
+                const carry1d = this.flags.cf;
+                const result16sbb = axsbb - imm16sbb - carry1d;
+                this.setRegister('ax', result16sbb & 0xffff);
+                // 设置标志位
+                this.updateFlags16(result16sbb, axsbb, imm16sbb + carry1d, 'sub');
+                instructionLength = 3;
+                break;
             case 0xf9: // STC - 设置进位标志
                 this.flags.cf = 1;
                 instructionLength = 1;
                 break;
             case 0xf8: // CLC - 清除进位标志
                 this.flags.cf = 0;
+                instructionLength = 1;
+                break;
+            case 0xf5: // CMC - 进位标志取反
+                this.flags.cf = this.flags.cf ? 0 : 1;
                 instructionLength = 1;
                 break;
             case 0x2c: // SUB AL, Ib
@@ -612,34 +692,52 @@ class CPU8086 {
                 } else {
                     // 内存到寄存器传送
                     let address = null;
-                    let segmentReg = 'ds';
+                    let disp = 0;
+
+                    // 读取偏移量（如果有）
+                    if (mod8b === 1) {
+                        // 8位偏移量
+                        disp = this.readMemory8(currentAddress + 2);
+                        if (disp >= 128) disp -= 256; // 符号扩展
+                    } else if (mod8b === 2) {
+                        // 16位偏移量
+                        disp = this.readMemory16(currentAddress + 2);
+                        if (disp >= 32768) disp -= 65536; // 符号扩展
+                    }
 
                     // 根据 r/m 字段确定寻址方式
                     if (rm8b === 0) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + this.getRegister('si'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + this.getRegister('si') + disp);
                     } else if (rm8b === 1) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + this.getRegister('di'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + this.getRegister('di') + disp);
                     } else if (rm8b === 2) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('si'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('si') + disp);
                     } else if (rm8b === 3) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('di'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('di') + disp);
                     } else if (rm8b === 4) {
                         // [SI]
-                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('si'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('si') + disp);
                     } else if (rm8b === 5) {
                         // [DI]
-                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('di'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('di') + disp);
                     } else if (rm8b === 6) {
                         // [BP]
-                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + disp);
                     } else if (rm8b === 7) {
                         // [BX]
-                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + disp);
                     }
 
                     if (address !== null) {
                         this.setRegister(regToName[reg8b], this.readMemory16(address));
-                        instructionLength = 2;
+                        // 根据mod确定指令长度
+                        if (mod8b === 0) {
+                            instructionLength = 2;
+                        } else if (mod8b === 1) {
+                            instructionLength = 3; // 操作码 + modr/m + 8位偏移
+                        } else if (mod8b === 2) {
+                            instructionLength = 4; // 操作码 + modr/m + 16位偏移
+                        }
                     } else {
                         console.error(`执行错误: 不支持的寻址模式 0x${modrm8b.toString(16)}`);
                         this.running = false;
@@ -675,31 +773,57 @@ class CPU8086 {
                         this.setRegister(dstReg, (dstValue & 0xff00) | srcByteValue);
                     }
                     instructionLength = 2;
+                } else if (mod8a === 0 && rm8a === 6) {
+                    // 直接寻址模式：MOV r8, [disp16]
+                    const offset16 = this.readMemory16(currentAddress + 2);
+                    const address = this.getMemoryAddress(this.getSegmentRegister('ds'), offset16);
+                    const byteValue = this.readMemory8(address);
+                    const dstReg = regToName8[reg8a];
+                    const dstValue = this.getRegister(dstReg);
+
+                    if (isHighByte[reg8a]) {
+                        this.setRegister(dstReg, (dstValue & 0x00ff) | (byteValue << 8));
+                    } else {
+                        this.setRegister(dstReg, (dstValue & 0xff00) | byteValue);
+                    }
+                    instructionLength = 4;
                 } else {
                     // 内存到寄存器传送 (8位)
                     let address = null;
+                    let disp = 0;
+
+                    // 读取偏移量（如果有）
+                    if (mod8a === 1) {
+                        // 8位偏移量
+                        disp = this.readMemory8(currentAddress + 2);
+                        if (disp >= 128) disp -= 256; // 符号扩展
+                    } else if (mod8a === 2) {
+                        // 16位偏移量
+                        disp = this.readMemory16(currentAddress + 2);
+                        if (disp >= 32768) disp -= 65536; // 符号扩展
+                    }
 
                     // 根据 r/m 字段确定寻址方式
                     if (rm8a === 0) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + this.getRegister('si'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + this.getRegister('si') + disp);
                     } else if (rm8a === 1) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + this.getRegister('di'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + this.getRegister('di') + disp);
                     } else if (rm8a === 2) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('si'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('si') + disp);
                     } else if (rm8a === 3) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('di'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('di') + disp);
                     } else if (rm8a === 4) {
                         // [SI]
-                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('si'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('si') + disp);
                     } else if (rm8a === 5) {
                         // [DI]
-                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('di'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('di') + disp);
                     } else if (rm8a === 6) {
                         // [BP]
-                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + disp);
                     } else if (rm8a === 7) {
                         // [BX]
-                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + disp);
                     }
 
                     if (address !== null) {
@@ -712,7 +836,14 @@ class CPU8086 {
                         } else {
                             this.setRegister(dstReg, (dstValue & 0xff00) | byteValue);
                         }
-                        instructionLength = 2;
+                        // 根据mod确定指令长度
+                        if (mod8a === 0) {
+                            instructionLength = 2;
+                        } else if (mod8a === 1) {
+                            instructionLength = 3; // 操作码 + modr/m + 8位偏移
+                        } else if (mod8a === 2) {
+                            instructionLength = 4; // 操作码 + modr/m + 16位偏移
+                        }
                     } else {
                         console.error(`执行错误: 不支持的寻址模式 0x${modrm8a.toString(16)}`);
                         this.running = false;
@@ -758,28 +889,49 @@ class CPU8086 {
                 } else {
                     // 寄存器到内存传送 (8位)
                     let address = null;
+                    let disp = 0;
+                    let segmentReg = 'ds';
 
+                    // 读取偏移量（如果有）
+                    if (mod88 === 1) {
+                        // 8位偏移量
+                        disp = this.readMemory8(currentAddress + 2);
+                        if (disp >= 128) disp -= 256; // 符号扩展
+                    } else if (mod88 === 2) {
+                        // 16位偏移量
+                        disp = this.readMemory16(currentAddress + 2);
+                        if (disp >= 32768) disp -= 65536; // 符号扩展
+                    }
+
+                    // 根据 r/m 字段确定寻址方式
                     if (rm88 === 0) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + this.getRegister('si'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + this.getRegister('si') + disp);
                     } else if (rm88 === 1) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + this.getRegister('di'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + this.getRegister('di') + disp);
                     } else if (rm88 === 2) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('si'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('si') + disp);
                     } else if (rm88 === 3) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('di'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('di') + disp);
                     } else if (rm88 === 4) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('si'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('si') + disp);
                     } else if (rm88 === 5) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('di'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('di') + disp);
                     } else if (rm88 === 6) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + disp);
                     } else if (rm88 === 7) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + disp);
                     }
 
                     if (address !== null) {
                         this.writeMemory8(address, srcByteValue88);
-                        instructionLength = 2;
+                        // 根据mod确定指令长度
+                        if (mod88 === 0) {
+                            instructionLength = 2;
+                        } else if (mod88 === 1) {
+                            instructionLength = 3; // 操作码 + modr/m + 8位偏移
+                        } else if (mod88 === 2) {
+                            instructionLength = 4; // 操作码 + modr/m + 16位偏移
+                        }
                     } else {
                         console.error(`执行错误: 不支持的寻址模式 0x${modrm88.toString(16)}`);
                         this.running = false;
@@ -817,30 +969,48 @@ class CPU8086 {
                 } else {
                     // 寄存器到内存传送
                     let address = null;
-                    let segmentReg = 'ds';
+                    let disp = 0;
+
+                    // 读取偏移量（如果有）
+                    if (mod89 === 1) {
+                        // 8位偏移量
+                        disp = this.readMemory8(currentAddress + 2);
+                        if (disp >= 128) disp -= 256; // 符号扩展
+                    } else if (mod89 === 2) {
+                        // 16位偏移量
+                        disp = this.readMemory16(currentAddress + 2);
+                        if (disp >= 32768) disp -= 65536; // 符号扩展
+                    }
 
                     // 根据 r/m 字段确定寻址方式
                     if (rm89 === 0) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + this.getRegister('si'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + this.getRegister('si') + disp);
                     } else if (rm89 === 1) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + this.getRegister('di'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + this.getRegister('di') + disp);
                     } else if (rm89 === 2) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('si'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('si') + disp);
                     } else if (rm89 === 3) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('di'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + this.getRegister('di') + disp);
                     } else if (rm89 === 4) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('si'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('si') + disp);
                     } else if (rm89 === 5) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('di'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('di') + disp);
                     } else if (rm89 === 6) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('bp') + disp);
                     } else if (rm89 === 7) {
-                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx'));
+                        address = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('bx') + disp);
                     }
 
                     if (address !== null) {
                         this.writeMemory16(address, this.getRegister(srcRegToName[reg89]));
-                        instructionLength = 2;
+                        // 根据mod确定指令长度
+                        if (mod89 === 0) {
+                            instructionLength = 2;
+                        } else if (mod89 === 1) {
+                            instructionLength = 3; // 操作码 + modr/m + 8位偏移
+                        } else if (mod89 === 2) {
+                            instructionLength = 4; // 操作码 + modr/m + 16位偏移
+                        }
                     } else {
                         console.error(`执行错误: 不支持的寻址模式 0x${modrm89.toString(16)}`);
                         this.running = false;
@@ -926,6 +1096,16 @@ class CPU8086 {
                 this.setRegister('di', imm16di);
                 instructionLength = 3;
                 break;
+            case 0xbd: // MOV BP, imm16
+                const imm16bp = this.readMemory16(currentAddress + 1);
+                this.setRegister('bp', imm16bp);
+                instructionLength = 3;
+                break;
+            case 0xbc: // MOV SP, imm16
+                const imm16sp = this.readMemory16(currentAddress + 1);
+                this.setRegister('sp', imm16sp);
+                instructionLength = 3;
+                break;
             case 0x90: // NOP
                 instructionLength = 1;
                 break;
@@ -985,6 +1165,27 @@ class CPU8086 {
                     instructionLength = 1;
                 }
                 break;
+            case 0x9c: // PUSHF - 将标志寄存器压入堆栈
+                {
+                    const flags = this.getFlags();
+                    const currentSP = this.getRegister('sp');
+                    const newSP = currentSP - 2;
+                    this.setRegister('sp', newSP);
+                    const address = this.getMemoryAddress(this.getSegmentRegister('ss'), newSP);
+                    this.writeMemory16(address, flags);
+                    instructionLength = 1;
+                }
+                break;
+            case 0x9d: // POPF - 从堆栈弹出标志寄存器
+                {
+                    const currentSP = this.getRegister('sp');
+                    const address = this.getMemoryAddress(this.getSegmentRegister('ss'), currentSP);
+                    const flags = this.readMemory16(address);
+                    this.setFlags(flags);
+                    this.setRegister('sp', currentSP + 2);
+                    instructionLength = 1;
+                }
+                break;
             case 0xc3: // RET
                 const currentSP = this.getRegister('sp');
                 if (currentSP === 0xfffe) {
@@ -1004,45 +1205,28 @@ class CPU8086 {
                 break;
             case 0xcd: // INT imm8
                 const interruptNum = this.readMemory8(currentAddress + 1);
-                // 简单处理：INT 21h 用于 DOS 功能调用
+
+                // 调用对应的中断处理程序
                 if (interruptNum === 0x21) {
-                    const ah = (this.getRegister('ax') >> 8) & 0xff;
-                    if (ah === 0x02) {
-                        // DOS 功能 02h：显示字符（DL）
-                        const dl = this.getRegister('dx') & 0xff;
-                        const char = String.fromCharCode(dl);
-                        // 将字符添加到输出缓冲区
-                        this.outputBuffer += char;
-                        // 调用更新显示的回调函数
-                        if (this.updateOutputDisplay) {
-                            this.updateOutputDisplay();
-                        }
-                    } else if (ah === 0x09) {
-                        // DOS 功能 09h：显示字符串（DS:DX）
-                        const ds = this.getSegmentRegister('ds');
-                        let dx = this.getRegister('dx');
-                        const stringAddress = (ds << 4) + dx;
-                        let char = this.readMemory8(stringAddress);
-                        while (char !== 0x24) { // 0x24 是 '$' 结束符
-                            this.outputBuffer += String.fromCharCode(char);
-                            dx++;
-                            char = this.readMemory8((ds << 4) + dx);
-                        }
-                        // 调用更新显示的回调函数
-                        if (this.updateOutputDisplay) {
-                            this.updateOutputDisplay();
-                        }
-                    } else if (ah === 0x4c) {
-                        // DOS 功能 4Ch：程序结束
-                        this.running = false;
-                        instructionLength = 2;
-                        // 不增加IP，而是将IP设置为一个非法值，确保程序真正结束
-                        this.ip = 0xffff;
-                        this.ip &= 0xffff;
-                        return false;
+                    // INT 21h - DOS功能调用
+                    const result = this.handleInt21();
+                    if (!result) {
+                        return false; // 暂停执行（如等待输入）
                     }
+                    // handler已经更新了IP，不需要再增加
+                    instructionLength = 0;
+                } else if (interruptNum === 0x16) {
+                    // INT 16h - BIOS键盘服务
+                    const result = this.handleInt16();
+                    if (!result) {
+                        return false; // 暂停执行（如等待输入）
+                    }
+                    // handler已经更新了IP，不需要再增加
+                    instructionLength = 0;
+                } else {
+                    // 其他中断，简单处理
+                    instructionLength = 2;
                 }
-                instructionLength = 2;
                 break;
             case 0x40: // INC AX
             case 0x41: // INC CX
@@ -1098,6 +1282,14 @@ class CPU8086 {
                 this.flags.df = 1;
                 instructionLength = 1;
                 break;
+            case 0xfa: // CLI - 清除中断标志
+                this.flags.if = 0;
+                instructionLength = 1;
+                break;
+            case 0xfb: // STI - 设置中断标志
+                this.flags.if = 1;
+                instructionLength = 1;
+                break;
             case 0xa8: // TEST AL, Ib
                 {
                     const imm = this.readMemory8(currentAddress + 1);
@@ -1116,9 +1308,9 @@ class CPU8086 {
                     instructionLength = 3;
                 }
                 break;
-            case 0xd0: // SHL/SHR r/m8, 1
+            case 0xd0: // SHL/SHR/ROL/ROR r/m8, 1
                 const modrm8 = this.readMemory8(currentAddress + 1);
-                const reg8 = (modrm8 >> 3) & 0x7; // 4=SHL, 5=SHR
+                const reg8 = (modrm8 >> 3) & 0x7; // 0=ROL, 1=ROR, 4=SHL, 5=SHR
                 const mod8 = (modrm8 >> 6) & 0x3;
                 const rm8 = modrm8 & 0x7;
 
@@ -1133,7 +1325,15 @@ class CPU8086 {
                     let result;
                     let carryOut;
 
-                    if (reg8 === 4) {
+                    if (reg8 === 0) {
+                        // ROL - 循环左移
+                        carryOut = (oldValue & 0x80) >> 7;
+                        result = ((oldValue << 1) | carryOut) & 0xff;
+                    } else if (reg8 === 1) {
+                        // ROR - 循环右移
+                        carryOut = oldValue & 0x01;
+                        result = ((oldValue >> 1) | (carryOut << 7)) & 0xff;
+                    } else if (reg8 === 4) {
                         // SHL
                         carryOut = (oldValue & 0x80) >> 7;
                         result = (oldValue << 1) & 0xff;
@@ -1167,9 +1367,9 @@ class CPU8086 {
                     return false;
                 }
                 break;
-            case 0xd1: // SHL/SHR r/m16, 1
+            case 0xd1: // SHL/SHR/ROL/ROR r/m16, 1
                 const modrm16 = this.readMemory8(currentAddress + 1);
-                const reg16 = (modrm16 >> 3) & 0x7; // 4=SHL, 5=SHR
+                const reg16 = (modrm16 >> 3) & 0x7; // 0=ROL, 1=ROR, 4=SHL, 5=SHR
                 const mod16 = (modrm16 >> 6) & 0x3;
                 const rm16 = modrm16 & 0x7;
 
@@ -1183,7 +1383,15 @@ class CPU8086 {
                     let result;
                     let carryOut;
 
-                    if (reg16 === 4) {
+                    if (reg16 === 0) {
+                        // ROL - 循环左移
+                        carryOut = (oldValue & 0x8000) >> 15;
+                        result = ((oldValue << 1) | carryOut) & 0xffff;
+                    } else if (reg16 === 1) {
+                        // ROR - 循环右移
+                        carryOut = oldValue & 0x0001;
+                        result = ((oldValue >> 1) | (carryOut << 15)) & 0xffff;
+                    } else if (reg16 === 4) {
                         // SHL
                         carryOut = (oldValue & 0x8000) >> 15;
                         result = (oldValue << 1) & 0xffff;
@@ -1467,6 +1675,66 @@ class CPU8086 {
                 this.setRegister('sp', this.getRegister('sp') + 2);
                 instructionLength = 1;
                 break;
+            case 0xf3: { // REP前缀
+                // 读取下一个字节以确定是哪种串操作
+                const nextByte = this.readMemory8(currentAddress + 1);
+                if (nextByte === 0xa4) { // REP MOVSB
+                    const cx = this.getRegister('cx');
+                    if (cx === 0) {
+                        // CX=0，跳过REP MOVSB
+                        instructionLength = 2;
+                    } else {
+                        // 执行一次MOVSB
+                        const ds = this.getSegmentRegister('ds');
+                        const es = this.getSegmentRegister('es');
+                        const si = this.getRegister('si');
+                        const di = this.getRegister('di');
+                        const src = this.getMemoryAddress(ds, si);
+                        const dst = this.getMemoryAddress(es, di);
+                        const value = this.readMemory8(src);
+                        this.writeMemory8(dst, value);
+                        const delta = this.flags.df ? -1 : 1;
+                        this.setRegister('si', (si + delta) & 0xffff);
+                        this.setRegister('di', (di + delta) & 0xffff);
+                        // CX减1
+                        this.setRegister('cx', (cx - 1) & 0xffff);
+                        // 如果CX不为0，重复执行REP MOVSB
+                        if (this.getRegister('cx') !== 0) {
+                            instructionLength = 0; // 不增加IP，重复执行
+                        } else {
+                            instructionLength = 2; // 执行完毕，跳过REP MOVSB
+                        }
+                    }
+                } else if (nextByte === 0xa5) { // REP MOVSW
+                    const cx = this.getRegister('cx');
+                    if (cx === 0) {
+                        instructionLength = 2;
+                    } else {
+                        const ds = this.getSegmentRegister('ds');
+                        const es = this.getSegmentRegister('es');
+                        const si = this.getRegister('si');
+                        const di = this.getRegister('di');
+                        const src = this.getMemoryAddress(ds, si);
+                        const dst = this.getMemoryAddress(es, di);
+                        const value = this.readMemory16(src);
+                        this.writeMemory16(dst, value);
+                        const delta = this.flags.df ? -2 : 2;
+                        this.setRegister('si', (si + delta) & 0xffff);
+                        this.setRegister('di', (di + delta) & 0xffff);
+                        this.setRegister('cx', (cx - 1) & 0xffff);
+                        if (this.getRegister('cx') !== 0) {
+                            instructionLength = 0;
+                        } else {
+                            instructionLength = 2;
+                        }
+                    }
+                } else {
+                    console.error(`执行错误: 不支持的REP操作 0x${nextByte.toString(16)}`);
+                    this.running = false;
+                    return false;
+                }
+                break;
+            }
             case 0xa4: { // MOVSB
                 const ds = this.getSegmentRegister('ds');
                 const es = this.getSegmentRegister('es');
@@ -1881,11 +2149,11 @@ class CPU8086 {
                 break;
             case 0xeb: // JMP short
                 const offset8 = this.readMemory8(currentAddress + 1);
-                // 符号扩展
+                // 符号扩展（8位有符号数转换为16位）
                 const signedOffset = offset8 > 0x7f ? offset8 - 0x100 : offset8;
-                // 跳转到目标地址：当前IP + 指令长度 + 偏移量
-                this.ip = this.ip + 2 + signedOffset;
-                this.ip &= 0xffff;
+                // 跳转到目标地址：当前IP + 指令长度(2) + 偏移量
+                // 注意：this.ip当前指向本条指令，所以直接加上指令长度和偏移量
+                this.ip = (this.ip + 2 + signedOffset) & 0xffff;
                 instructionLength = 0; // 不增加IP，因为已经手动设置了
                 break;
             case 0x74: // JZ/JE short
@@ -2442,7 +2710,41 @@ class CPU8086 {
             this.flags.of = 0; // AND/OR/XOR 溢出标志为0
         }
     }
-    
+
+    // 获取标志寄存器值（16位）
+    getFlags() {
+        // 标志位布局（从低到高）：CF(0), PF(2), AF(4), ZF(6), SF(7), TF(8), IF(9), DF(10), OF(11)
+        let flags = 0;
+        flags |= (this.flags.cf || 0) << 0;   // 进位标志
+        flags |= (this.flags.pf || 0) << 2;   // 奇偶标志
+        flags |= (this.flags.af || 0) << 4;   // 辅助进位标志
+        flags |= (this.flags.zf || 0) << 6;   // 零标志
+        flags |= (this.flags.sf || 0) << 7;   // 符号标志
+        flags |= (this.flags.tf || 0) << 8;   // 陷阱标志
+        flags |= (this.flags.if || 0) << 9;   // 中断使能标志
+        flags |= (this.flags.df || 0) << 10;  // 方向标志
+        flags |= (this.flags.of || 0) << 11;  // 溢出标志
+        // 固定为1的位（位1, 3, 5）
+        flags |= 0x0002; // 位1固定为1
+        flags |= 0x0008; // 位3固定为1
+        flags |= 0x0020; // 位5固定为1
+        return flags & 0xffff;
+    }
+
+    // 设置标志寄存器值（16位）
+    setFlags(flags) {
+        // 标志位布局（从低到高）：CF(0), PF(2), AF(4), ZF(6), SF(7), TF(8), IF(9), DF(10), OF(11)
+        this.flags.cf = (flags >> 0) & 1;   // 进位标志
+        this.flags.pf = (flags >> 2) & 1;   // 奇偶标志
+        this.flags.af = (flags >> 4) & 1;   // 辅助进位标志
+        this.flags.zf = (flags >> 6) & 1;   // 零标志
+        this.flags.sf = (flags >> 7) & 1;   // 符号标志
+        this.flags.tf = (flags >> 8) & 1;   // 陷阱标志
+        this.flags.if = (flags >> 9) & 1;   // 中断使能标志
+        this.flags.df = (flags >> 10) & 1;  // 方向标志
+        this.flags.of = (flags >> 11) & 1;  // 溢出标志
+    }
+
     // 运行
     run() {
         this.running = true;
@@ -2515,5 +2817,287 @@ class CPU8086 {
         // 跟踪8位寄存器操作
         const highByteReg = reg.charAt(0) + 'h'; // ah, bh, ch, dh
         this.registerOperations.set(highByteReg, { type: 'write', value: value & 0xff, oldValue: (oldValue >> 8) & 0xff });
+    }
+
+    // ==================== 中断处理程序 ====================
+
+    // INT 21h 处理程序 - DOS功能调用
+    handleInt21() {
+        const ah = (this.getRegister('ax') >> 8) & 0xff;
+
+        switch (ah) {
+            case 0x01:
+                return this.int21AH01KeyboardInput();
+            case 0x02:
+                return this.int21AH02DisplayChar();
+            case 0x06:
+                return this.int21AH06DirectConsoleIO();
+            case 0x07:
+                return this.int21AH07DirectInputNoEcho();
+            case 0x09:
+                return this.int21AH09DisplayString();
+            case 0x0a:
+                return this.int21AH0AStringInput();
+            case 0x4c:
+                return this.int21AH4CExit();
+            default:
+                console.warn(`未实现的INT 21h功能: AH=${ah.toString(16).padStart(2, '0')}`);
+                return true; // 继续执行
+        }
+    }
+
+    // INT 21h AH=01h: 从键盘读取字符并回显
+    int21AH01KeyboardInput() {
+        if (this.keyboardBuffer.length > 0) {
+            // 有按键，处理它
+            const key = this.keyboardBuffer.shift();
+            this.setRegister('ax', (this.getRegister('ax') & 0xff00) | key);
+            // 回显到屏幕
+            this.outputBuffer += String.fromCharCode(key);
+            if (this.updateOutputDisplay) {
+                this.updateOutputDisplay();
+            }
+            // 更新IP到下一条指令（INT 21h是2字节指令）
+            this.ip += 2;
+            this.ip &= 0xffff;
+            return true; // 处理完成，继续执行
+        } else {
+            // 等待键盘输入
+            if (this.waitForKeyPress && !this.waitingForKey) {
+                this.waitingForKey = true;
+                this.waitForKeyPress((key) => {
+                    this.keyboardBuffer.push(key);
+                    this.waitingForKey = false;
+                    // 更新显示
+                    if (this.updateOutputDisplay) {
+                        this.updateOutputDisplay();
+                    }
+                });
+            }
+            return false; // 暂停执行，等待输入
+        }
+    }
+
+    // INT 21h AH=02h: 显示字符
+    int21AH02DisplayChar() {
+        const dl = this.getRegister('dx') & 0xff;
+        const char = String.fromCharCode(dl);
+        this.outputBuffer += char;
+        if (this.updateOutputDisplay) {
+            this.updateOutputDisplay();
+        }
+        // 更新IP到下一条指令
+        this.ip += 2;
+        this.ip &= 0xffff;
+        return true;
+    }
+
+    // INT 21h AH=06h: 直接控制台I/O
+    int21AH06DirectConsoleIO() {
+        const dl = this.getRegister('dx') & 0xff;
+
+        if (dl === 0xff) {
+            // 输入模式：检查是否有按键
+            if (this.keyboardBuffer.length > 0) {
+                // 有按键，读取但不从缓冲区移除
+                const key = this.keyboardBuffer[0];
+                this.setRegister('ax', (this.getRegister('ax') & 0xff00) | key);
+                // 清除ZF标志（表示有按键）
+                this.flags.zf = 0;
+            } else {
+                // 无按键，设置ZF标志
+                this.flags.zf = 1;
+            }
+        } else {
+            // 输出模式：显示字符
+            const char = String.fromCharCode(dl);
+            this.outputBuffer += char;
+            if (this.updateOutputDisplay) {
+                this.updateOutputDisplay();
+            }
+        }
+        // 更新IP到下一条指令
+        this.ip += 2;
+        this.ip &= 0xffff;
+        return true;
+    }
+
+    // INT 21h AH=07h: 无回显直接输入
+    int21AH07DirectInputNoEcho() {
+        if (this.keyboardBuffer.length > 0) {
+            // 有按键，处理它（不回显）
+            const key = this.keyboardBuffer.shift();
+            this.setRegister('ax', (this.getRegister('ax') & 0xff00) | key);
+            // 更新IP到下一条指令
+            this.ip += 2;
+            this.ip &= 0xffff;
+            return true;
+        } else {
+            // 等待键盘输入
+            if (this.waitForKeyPress && !this.waitingForKey) {
+                this.waitingForKey = true;
+                this.waitForKeyPress((key) => {
+                    this.keyboardBuffer.push(key);
+                    this.waitingForKey = false;
+                    if (this.updateOutputDisplay) {
+                        this.updateOutputDisplay();
+                    }
+                });
+            }
+            return false; // 暂停执行，等待输入
+        }
+    }
+
+    // INT 21h AH=09h: 显示字符串
+    int21AH09DisplayString() {
+        const ds = this.getSegmentRegister('ds');
+        let dx = this.getRegister('dx');
+        const stringAddress = (ds << 4) + dx;
+        let char = this.readMemory8(stringAddress);
+        while (char !== 0x24) { // 0x24 是 '$' 结束符
+            this.outputBuffer += String.fromCharCode(char);
+            dx++;
+            char = this.readMemory8((ds << 4) + dx);
+        }
+        if (this.updateOutputDisplay) {
+            this.updateOutputDisplay();
+        }
+        // 更新IP到下一条指令
+        this.ip += 2;
+        this.ip &= 0xffff;
+        return true;
+    }
+
+    // INT 21h AH=0Ah: 字符串输入
+    int21AH0AStringInput() {
+        const ds = this.getSegmentRegister('ds');
+        const dx = this.getRegister('dx');
+        const bufferAddress = (ds << 4) + dx;
+
+        // 读取缓冲区的最大长度（第一个字节）
+        const maxLength = this.readMemory8(bufferAddress);
+
+        if (this.keyboardBuffer.length > 0) {
+            // 收集所有可用的按键，直到遇到回车(0x0D)或达到最大长度
+            let inputLength = 0;
+            let inputString = '';
+
+            while (this.keyboardBuffer.length > 0 && inputLength < maxLength) {
+                const key = this.keyboardBuffer.shift();
+
+                if (key === 0x0D) { // 回车键
+                    break;
+                } else if (key === 0x08) { // 退格键
+                    if (inputLength > 0) {
+                        inputLength--;
+                        inputString = inputString.slice(0, -1);
+                        // 从屏幕删除字符（发送退格-空格-退格序列）
+                        this.outputBuffer += '\b \b';
+                    }
+                } else {
+                    inputString += String.fromCharCode(key);
+                    inputLength++;
+                    // 回显到屏幕
+                    this.outputBuffer += String.fromCharCode(key);
+                }
+            }
+
+            // 将输入的字符串写入缓冲区
+            // 第二个字节是实际输入的长度
+            this.writeMemory8(bufferAddress + 1, inputLength);
+            // 从第三个字节开始存储字符串
+            for (let i = 0; i < inputLength; i++) {
+                this.writeMemory8(bufferAddress + 2 + i, inputString.charCodeAt(i));
+            }
+
+            if (this.updateOutputDisplay) {
+                this.updateOutputDisplay();
+            }
+
+            // 更新IP到下一条指令
+            this.ip += 2;
+            this.ip &= 0xffff;
+            return true;
+        } else {
+            // 等待键盘输入
+            if (this.waitForKeyPress && !this.waitingForKey) {
+                this.waitingForKey = true;
+                this.waitForKeyPress((key) => {
+                    this.keyboardBuffer.push(key);
+                    this.waitingForKey = false;
+                    if (this.updateOutputDisplay) {
+                        this.updateOutputDisplay();
+                    }
+                });
+            }
+            return false; // 暂停执行，等待输入
+        }
+    }
+
+    // INT 21h AH=4Ch: 程序结束
+    int21AH4CExit() {
+        this.running = false;
+        // 将IP设置为一个非法值，确保程序真正结束
+        this.ip = 0xffff;
+        this.ip &= 0xffff;
+        return false; // 停止执行
+    }
+
+    // INT 16h 处理程序 - BIOS键盘服务
+    handleInt16() {
+        const ah = (this.getRegister('ax') >> 8) & 0xff;
+
+        switch (ah) {
+            case 0x00:
+                return this.int16AH00WaitKey();
+            case 0x01:
+                return this.int16AH01CheckKey();
+            default:
+                console.warn(`未实现的INT 16h功能: AH=${ah.toString(16).padStart(2, '0')}`);
+                return true;
+        }
+    }
+
+    // INT 16h AH=00h: 等待键盘输入
+    int16AH00WaitKey() {
+        if (this.keyboardBuffer.length > 0) {
+            const key = this.keyboardBuffer.shift();
+            this.setRegister('ax', (this.getRegister('ax') & 0xff00) | key);
+            // 更新IP到下一条指令
+            this.ip += 2;
+            this.ip &= 0xffff;
+            return true;
+        } else {
+            // 等待键盘输入
+            if (this.waitForKeyPress && !this.waitingForKey) {
+                this.waitingForKey = true;
+                this.waitForKeyPress((key) => {
+                    this.keyboardBuffer.push(key);
+                    this.waitingForKey = false;
+                    if (this.updateOutputDisplay) {
+                        this.updateOutputDisplay();
+                    }
+                });
+            }
+            return false; // 暂停执行，等待输入
+        }
+    }
+
+    // INT 16h AH=01h: 检查键盘缓冲区
+    int16AH01CheckKey() {
+        if (this.keyboardBuffer.length > 0) {
+            // 有按键，ZF=0
+            this.flags.zf = 0;
+            // 读取但不移除按键
+            const key = this.keyboardBuffer[0];
+            this.setRegister('ax', (this.getRegister('ax') & 0xff00) | key);
+        } else {
+            // 无按键，ZF=1
+            this.flags.zf = 1;
+        }
+        // 更新IP到下一条指令
+        this.ip += 2;
+        this.ip &= 0xffff;
+        return true;
     }
 }
