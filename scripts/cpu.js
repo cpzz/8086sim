@@ -78,6 +78,54 @@ class CPU8086 {
         return value;
     }
     
+    // 获取8位寄存器值
+    getRegister8(name) {
+        const regName = name.toLowerCase();
+        // 8位寄存器映射到16位寄存器
+        const regMap = {
+            'al': 'ax', 'ah': 'ax',
+            'bl': 'bx', 'bh': 'bx',
+            'cl': 'cx', 'ch': 'cx',
+            'dl': 'dx', 'dh': 'dx'
+        };
+        const parentReg = regMap[regName];
+        if (!parentReg) return 0;
+        
+        const value16 = this.getRegister(parentReg);
+        if (regName.endsWith('h')) {
+            // 高8位
+            return (value16 >> 8) & 0xff;
+        } else {
+            // 低8位
+            return value16 & 0xff;
+        }
+    }
+    
+    // 设置8位寄存器值
+    setRegister8(name, value) {
+        const regName = name.toLowerCase();
+        // 8位寄存器映射到16位寄存器
+        const regMap = {
+            'al': 'ax', 'ah': 'ax',
+            'bl': 'bx', 'bh': 'bx',
+            'cl': 'cx', 'ch': 'cx',
+            'dl': 'dx', 'dh': 'dx'
+        };
+        const parentReg = regMap[regName];
+        if (!parentReg) return;
+        
+        const value16 = this.getRegister(parentReg);
+        const newValue8 = value & 0xff;
+        
+        if (regName.endsWith('h')) {
+            // 设置高8位
+            this.setRegister(parentReg, (value16 & 0x00ff) | (newValue8 << 8));
+        } else {
+            // 设置低8位
+            this.setRegister(parentReg, (value16 & 0xff00) | newValue8);
+        }
+    }
+
     // 设置寄存器值（16位）
     setRegister(name, value) {
         const regName = name.toLowerCase();
@@ -569,6 +617,56 @@ class CPU8086 {
                     instructionLength = 2;
                 } else {
                     console.error(`执行错误: 不支持的寻址模式 mod=${mod31}`);
+                    this.running = false;
+                    return false;
+                }
+                break;
+            case 0x87: // XCHG r/m16, r16
+                const modrm87 = this.readMemory8(currentAddress + 1);
+                const reg87 = (modrm87 >> 3) & 0x7;
+                const mod87 = (modrm87 >> 6) & 0x3;
+                const rm87 = modrm87 & 0x7;
+
+                // 寄存器映射
+                const regToName87 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+                const rmToName87 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+
+                if (mod87 === 3) {
+                    // 寄存器到寄存器 XCHG
+                    const srcValue87 = this.getRegister(regToName87[reg87]);
+                    const dstValue87 = this.getRegister(rmToName87[rm87]);
+                    // 交换值
+                    this.setRegister(rmToName87[rm87], srcValue87 & 0xffff);
+                    this.setRegister(regToName87[reg87], dstValue87 & 0xffff);
+                    // XCHG 不影响标志位
+                    instructionLength = 2;
+                } else {
+                    console.error(`执行错误: XCHG 不支持的寻址模式 mod=${mod87}`);
+                    this.running = false;
+                    return false;
+                }
+                break;
+            case 0x86: // XCHG r/m8, r8
+                const modrm86 = this.readMemory8(currentAddress + 1);
+                const reg86 = (modrm86 >> 3) & 0x7;
+                const mod86 = (modrm86 >> 6) & 0x3;
+                const rm86 = modrm86 & 0x7;
+
+                // 8位寄存器映射
+                const regToName86 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
+                const rmToName86 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
+
+                if (mod86 === 3) {
+                    // 寄存器到寄存器 XCHG (8位)
+                    const srcValue86 = this.getRegister8(regToName86[reg86]);
+                    const dstValue86 = this.getRegister8(rmToName86[rm86]);
+                    // 交换值
+                    this.setRegister8(rmToName86[rm86], srcValue86 & 0xff);
+                    this.setRegister8(regToName86[reg86], dstValue86 & 0xff);
+                    // XCHG 不影响标志位
+                    instructionLength = 2;
+                } else {
+                    console.error(`执行错误: XCHG 不支持的寻址模式 mod=${mod86}`);
                     this.running = false;
                     return false;
                 }
@@ -2086,6 +2184,30 @@ class CPU8086 {
                     instructionLength = 2;
                 } else {
                     console.error(`执行错误: 不支持的寻址模式 mod=${mod39}`);
+                    this.running = false;
+                    return false;
+                }
+                break;
+            case 0x3a: // CMP r8, r/m8
+                const modrm3a = this.readMemory8(currentAddress + 1);
+                const reg3a = (modrm3a >> 3) & 0x7;
+                const mod3a = (modrm3a >> 6) & 0x3;
+                const rm3a = modrm3a & 0x7;
+
+                // 8位寄存器映射
+                const regToName3a = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
+                const rmToName3a = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
+
+                if (mod3a === 3) {
+                    // 寄存器到寄存器 CMP (8位)
+                    const srcValue3a = this.getRegister8(rmToName3a[rm3a]);
+                    const dstValue3a = this.getRegister8(regToName3a[reg3a]);
+                    const result3a = dstValue3a - srcValue3a;
+                    // 设置标志位，但不修改寄存器
+                    this.updateFlags8(result3a, dstValue3a, srcValue3a, 'sub');
+                    instructionLength = 2;
+                } else {
+                    console.error(`执行错误: CMP 8位不支持的寻址模式 mod=${mod3a}`);
                     this.running = false;
                     return false;
                 }

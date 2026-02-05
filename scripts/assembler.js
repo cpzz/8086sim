@@ -1187,6 +1187,45 @@ class Assembler {
                         originalLine: originalLine.trim()
                     };
                 }
+                if (operands[0] === 'dx' && operands[1] === 'dx') {
+                    // XOR DX, DX - 清零寄存器
+                    return {
+                        address,
+                        opcode: 'XOR',
+                        operands: ['DX', 'DX'],
+                        machineCode: [0x31, 0xd2],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (operands[0] === 'bx' && operands[1] === 'bx') {
+                    // XOR BX, BX - 清零寄存器
+                    return {
+                        address,
+                        opcode: 'XOR',
+                        operands: ['BX', 'BX'],
+                        machineCode: [0x31, 0xdb],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                // 通用寄存器-寄存器 XOR (16位) - 使用 0x31 指令
+                const reg16MapXor = { 'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3, 'sp': 4, 'bp': 5, 'si': 6, 'di': 7 };
+                if (reg16MapXor.hasOwnProperty(operands[0]) && reg16MapXor.hasOwnProperty(operands[1])) {
+                    const reg1 = reg16MapXor[operands[0]];
+                    const reg2 = reg16MapXor[operands[1]];
+                    // 0x31: XOR r/m16, r16
+                    // ModR/M: mod=11(寄存器), reg=reg1, rm=reg2
+                    const modRM = (3 << 6) | (reg1 << 3) | reg2;
+                    return {
+                        address,
+                        opcode: 'XOR',
+                        operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                        machineCode: [0x31, modRM],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
                 break;
             case 'adc':
                 if (operands[0] === 'al') {
@@ -2275,6 +2314,40 @@ class Assembler {
                         opcode: 'CMP',
                         operands: ['AX', 'BX'],
                         machineCode: [0x39, 0xc3],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                // 通用寄存器-寄存器 CMP (16位) - 使用 0x39 指令
+                const reg16MapCmp = { 'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3, 'sp': 4, 'bp': 5, 'si': 6, 'di': 7 };
+                if (reg16MapCmp.hasOwnProperty(operands[0]) && reg16MapCmp.hasOwnProperty(operands[1])) {
+                    const reg1 = reg16MapCmp[operands[0]];
+                    const reg2 = reg16MapCmp[operands[1]];
+                    // 0x39: CMP r/m16, r16
+                    // ModR/M: mod=11(寄存器), reg=reg1, rm=reg2
+                    const modRM = (3 << 6) | (reg1 << 3) | reg2;
+                    return {
+                        address,
+                        opcode: 'CMP',
+                        operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                        machineCode: [0x39, modRM],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                // 通用寄存器-寄存器 CMP (8位) - 使用 0x3a 指令
+                const reg8MapCmp = { 'al': 0, 'cl': 1, 'dl': 2, 'bl': 3, 'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7 };
+                if (reg8MapCmp.hasOwnProperty(operands[0]) && reg8MapCmp.hasOwnProperty(operands[1])) {
+                    const reg1 = reg8MapCmp[operands[0]];
+                    const reg2 = reg8MapCmp[operands[1]];
+                    // 0x3a: CMP r8, r/m8
+                    // ModR/M: mod=11(寄存器), reg=reg1, rm=reg2
+                    const modRM = (3 << 6) | (reg1 << 3) | reg2;
+                    return {
+                        address,
+                        opcode: 'CMP',
+                        operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                        machineCode: [0x3a, modRM],
                         length: 2,
                         originalLine: originalLine.trim()
                     };
@@ -3425,6 +3498,40 @@ class Assembler {
                         operands: ['DX', 'AX'],
                         machineCode: [0x92],
                         length: 1,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                // 通用寄存器-寄存器 XCHG (16位) - 使用 0x87 指令
+                const reg16MapXchg = { 'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3, 'sp': 4, 'bp': 5, 'si': 6, 'di': 7 };
+                if (reg16MapXchg.hasOwnProperty(operands[0]) && reg16MapXchg.hasOwnProperty(operands[1])) {
+                    const reg1 = reg16MapXchg[operands[0]];
+                    const reg2 = reg16MapXchg[operands[1]];
+                    // 0x87: XCHG r/m16, r16
+                    // ModR/M: mod=11(寄存器), reg=reg1, rm=reg2
+                    const modRM = (3 << 6) | (reg1 << 3) | reg2;
+                    return {
+                        address,
+                        opcode: 'XCHG',
+                        operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                        machineCode: [0x87, modRM],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                // 通用寄存器-寄存器 XCHG (8位) - 使用 0x86 指令
+                const reg8MapXchg = { 'al': 0, 'cl': 1, 'dl': 2, 'bl': 3, 'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7 };
+                if (reg8MapXchg.hasOwnProperty(operands[0]) && reg8MapXchg.hasOwnProperty(operands[1])) {
+                    const reg1 = reg8MapXchg[operands[0]];
+                    const reg2 = reg8MapXchg[operands[1]];
+                    // 0x86: XCHG r/m8, r8
+                    // ModR/M: mod=11(寄存器), reg=reg1, rm=reg2
+                    const modRM = (3 << 6) | (reg1 << 3) | reg2;
+                    return {
+                        address,
+                        opcode: 'XCHG',
+                        operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                        machineCode: [0x86, modRM],
+                        length: 2,
                         originalLine: originalLine.trim()
                     };
                 }

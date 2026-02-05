@@ -1125,8 +1125,6 @@ function setupKeyboardInput() {
             // 确保是8位值
             charCode = charCode & 0xFF;
             
-            console.log('Key pressed:', e.key, 'charCode:', charCode);
-            
             // 调用回调
             const callback = keyPressCallback;
             keyPressCallback = null;
@@ -1161,7 +1159,6 @@ function handleKeyPress(callback) {
     // 设置焦点到文档，确保能接收键盘事件
     window.focus();
     document.body.focus();
-    console.log('Waiting for keyboard input...');
 }
 
 // 页面加载完成后初始化

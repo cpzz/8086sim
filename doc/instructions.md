@@ -1,374 +1,340 @@
-8086汇编指令全集（按功能分类）
+8086汇编指令格式详解
 
-8086指令集包含约100条基本指令，是现代x86指令集的基础。以下是完整分类：
+一、8086指令的基本格式
 
-一、数据传送指令（Data Transfer）
+8086汇编指令的一般格式为：
 
-1. 通用数据传送
+[标号:] 操作码 [操作数1 [, 操作数2]] [;注释]
 
-指令 格式 功能 示例
 
-MOV MOV 目标, 源 传送数据 MOV AX, BX
+二、指令长度分类
 
-XCHG XCHG 操作数1, 操作数2 交换数据 XCHG AX, BX
+1. 单字节指令
 
-PUSH PUSH 源 压栈 PUSH AX
+NOP        ; 无操作
+XLAT       ; 查表转换
+AAA        ; ASCII加法调整
 
-POP POP 目标 出栈 POP BX
 
-PUSHF PUSHF 标志寄存器压栈 PUSHF
+2. 双字节指令
 
-POPF POPF 标志寄存器出栈 POPF
+INC CX     ; 寄存器加1
+DEC AL     ; 寄存器减1
+PUSH AX    ; 入栈
 
-2. 地址传送
-指令 格式 功能 示例
 
-LEA LEA 目标, 源 取有效地址 LEA DX, MSG
+3. 三字节指令
 
-LDS LDS 目标, 源 取指针到DS:reg LDS SI, [BX]
+MOV AX, 1234H  ; 立即数传送到寄存器
+ADD BX, 5678H  ; 立即数加法
 
-LES LES 目标, 源 取指针到ES:reg LES DI, [BX]
-3. 输入输出
-指令 格式 功能 示例
 
-IN IN 累加器, 端口 输入 IN AL, 60h
+4. 四字节及更多字节指令
 
-OUT OUT 端口, 累加器 输出 OUT 61h, AL
+MOV AX, [BX+SI+1234H]  ; 带位移的基址变址寻址
 
-二、算术运算指令（Arithmetic）
 
-1. 加法
+三、操作数寻址方式
 
-指令 格式 功能 示例
+1. 立即寻址
 
-ADD ADD 目标, 源 加法 ADD AX, BX
+MOV AX, 1234H    ; 立即数 → AX
+ADD BL, 5        ; 立即数加法
+CMP CX, 100      ; 与立即数比较
 
-ADC ADC 目标, 源 带进位加法 ADC AX, CX
 
-INC INC 目标 加1 INC AX
+2. 寄存器寻址
 
-AAA AAA ASCII加法调整 AAA
+MOV AX, BX       ; 寄存器 → 寄存器
+ADD AL, CL       ; 寄存器加法
+INC SI           ; 寄存器自增
 
-DAA DAA 十进制加法调整 DAA
-2. 减法
-指令 格式 功能 示例
 
-SUB SUB 目标, 源 减法 SUB AX, 10
+3. 直接寻址
 
-SBB SBB 目标, 源 带借位减法 SBB AX, BX
+MOV AX, [2000H]  ; 内存单元 → 寄存器
+MOV [1000H], BX  ; 寄存器 → 内存单元
 
-DEC DEC 目标 减1 DEC CX
 
-NEG NEG 目标 求补（取负） NEG AX
+4. 寄存器间接寻址
 
-CMP CMP 目标, 源 比较 CMP AL, 0
+使用BX、BP、SI、DI：
+MOV AX, [BX]     ; DS:[BX] → AX
+MOV [SI], CL     ; CL → DS:[SI]
+MOV AX, [BP]     ; SS:[BP] → AX
 
-AAS AAS ASCII减法调整 AAS
 
-DAS DAS 十进制减法调整 DAS
-3. 乘法
-指令 格式 功能 示例
+5. 寄存器相对寻址
 
-MUL MUL 源 无符号乘法 MUL BL
+MOV AX, [BX+10]  ; DS:[BX+10] → AX
+MOV CL, [SI+5]   ; DS:[SI+5] → CL
+MOV [BP-4], DX   ; DX → SS:[BP-4]
 
-IMUL IMUL 源 有符号乘法 IMUL BX
 
-AAM AAM ASCII乘法调整 AAM
-4. 除法
-指令 格式 功能 示例
+6. 基址变址寻址
 
-DIV DIV 源 无符号除法 DIV BL
+MOV AX, [BX+SI]  ; DS:[BX+SI] → AX
+MOV [BP+DI], CX  ; CX → SS:[BP+DI]
 
-IDIV IDIV 源 有符号除法 IDIV BX
 
-AAD AAD ASCII除法调整 AAD
+7. 相对基址变址寻址
 
-三、逻辑运算指令（Logical）
+MOV AX, [BX+SI+10]  ; DS:[BX+SI+10] → AX
+MOV [BP+DI-5], DL   ; DL → SS:[BP+DI-5]
 
-1. 基本逻辑
 
-指令 格式 功能 示例
+四、主要指令类别及格式
 
-AND AND 目标, 源 逻辑与 AND AL, 0Fh
+1. 数据传送指令
 
-OR OR 目标, 源 逻辑或 OR AL, 80h
+MOV - 传送
 
-XOR XOR 目标, 源 逻辑异或 XOR AX, AX
+MOV dest, src     ; src → dest
+; 格式限制：两者不能同时为内存操作数
+MOV AX, BX        ; 合法
+MOV [DI], AX      ; 合法
+MOV DS, AX        ; 段寄存器操作
 
-NOT NOT 目标 逻辑非 NOT AL
 
-TEST TEST 目标, 源 测试位 TEST AL, 01h
-2. 移位
-指令 格式 功能 示例
+PUSH/POP - 堆栈操作
 
-SHL/SAL SHL 目标, 计数 逻辑/算术左移 SHL AX, 1
+PUSH src          ; SP-2, src → [SS:SP]
+POP dest          ; [SS:SP] → dest, SP+2
+PUSH AX
+POP BX
 
-SHR SHR 目标, 计数 逻辑右移 SHR AX, 1
 
-SAR SAR 目标, 计数 算术右移 SAR AX, 1
-3. 循环移位
-指令 格式 功能 示例
+XCHG - 交换
 
-ROL ROL 目标, 计数 循环左移 ROL AL, 1
+XCHG op1, op2     ; 交换op1和op2
+XCHG AX, BX       ; 寄存器交换
+XCHG AL, [SI]     ; 寄存器和内存交换
 
-ROR ROR 目标, 计数 循环右移 ROR AL, 1
 
-RCL RCL 目标, 计数 带进位循环左移 RCL AX, 1
+2. 算术运算指令
 
-RCR RCR 目标, 计数 带进位循环右移 RCR AX, 1
-四、串操作指令（String）
-指令 格式 功能 示例
+ADD/ADC - 加法/带进位加法
 
-MOVS MOVSB/MOVSW 串传送 MOVSB
+ADD dest, src     ; dest ← dest + src
+ADC dest, src     ; dest ← dest + src + CF
+ADD AX, CX
+ADC WORD PTR [BX], 5
 
-CMPS CMPSB/CMPSW 串比较 CMPSB
 
-SCAS SCASB/SCASW 串扫描 SCASB
+SUB/SBB - 减法/带借位减法
 
-LODS LODSB/LODSW 取串 LODSB
+SUB dest, src     ; dest ← dest - src
+SBB dest, src     ; dest ← dest - src - CF
+SUB AL, 10
+SBB WORD PTR [DI], AX
 
-STOS STOSB/STOSW 存串 STOSB
 
-REP REP 串指令 重复前缀 REP MOVSB
+MUL/IMUL - 乘法
 
-REPE/REPZ REPE 串指令 相等时重复 REPE CMPSB
+MUL src           ; 无符号乘法: AX ← AL×src 或 DX:AX ← AX×src
+IMUL src          ; 有符号乘法
+MUL BL            ; AL×BL → AX
+IMUL WORD PTR [BX] ; AX×[BX] → DX:AX
 
-REPNE/REPNZ REPNE 串指令 不等时重复 REPNE SCASB
 
-五、控制转移指令（Control Transfer）
+DIV/IDIV - 除法
 
-1. 无条件转移
+DIV src           ; 无符号除法
+IDIV src          ; 有符号除法
+DIV CL            ; AX÷CL → AL(商), AH(余)
 
-指令 格式 功能 示例
 
-JMP JMP 目标 无条件跳转 JMP START
+3. 逻辑运算指令
 
-CALL CALL 目标 调用子程序 CALL DELAY
+AND/OR/XOR/NOT
 
-RET RET [n] 返回 RET
+AND dest, src     ; 逻辑与
+OR  dest, src     ; 逻辑或
+XOR dest, src     ; 异或
+NOT dest          ; 取反
+AND AX, 00FFH
+XOR BX, BX        ; BX清零
 
-RETF RETF [n] 远返回 RETF
-2. 条件转移
-指令 格式 条件 描述
 
-JZ/JE JZ 目标 ZF=1 为零/相等跳转
+TEST - 测试
 
-JNZ/JNE JNZ 目标 ZF=0 非零/不等跳转
+TEST dest, src    ; dest AND src, 只影响标志
+TEST AL, 80H      ; 测试最高位
 
-JC/JB/JNAE JC 目标 CF=1 有进位/低于跳转
 
-JNC/JNB/JAE JNC 目标 CF=0 无进位/不低于跳转
+4. 移位指令
 
-JS JS 目标 SF=1 符号为负跳转
+SHL/SHR - 逻辑左移/右移
 
-JNS JNS 目标 SF=0 符号为正跳转
+SHL dest, count   ; 逻辑左移
+SHR dest, count   ; 逻辑右移
+SHL AX, 1
+SHR BL, CL        ; CL存放移位次数
 
-JO JO 目标 OF=1 溢出跳转
 
-JNO JNO 目标 OF=0 无溢出跳转
+SAL/SAR - 算术左移/右移
 
-JP/JPE JP 目标 PF=1 偶校验跳转
+SAL dest, count   ; 同SHL
+SAR dest, count   ; 算术右移(保持符号)
+SAR BYTE PTR [SI], 1
 
-JNP/JPO JNP 目标 PF=0 奇校验跳转
-3. 有符号数比较
-指令 条件 描述
 
-JL/JNGE SF≠OF 小于/不大于等于
+ROL/ROR - 循环左移/右移
 
-JNL/JGE SF=OF 不小于/大于等于
+ROL dest, count   ; 循环左移
+ROR dest, count   ; 循环右移
+ROL DH, 1
 
-JG/JNLE ZF=0且SF=OF 大于/不小于等于
 
-JNG/JLE ZF=1或SF≠OF 不大于/小于等于
-4. 无符号数比较
-指令 条件 描述
+5. 转移指令
 
-JB/JNAE CF=1 低于/不高于等于
+JMP - 无条件转移
 
-JNB/JAE CF=0 不低于/高于等于
+JMP label         ; 直接转移
+JMP BX            ; 寄存器间接转移
+JMP WORD PTR [BX] ; 内存间接转移
+JMP FAR PTR label ; 段间转移
 
-JA/JNBE CF=0且ZF=0 高于/不低于等于
 
-JNA/JBE CF=1或ZF=1 不高于/低于等于
-5. 循环控制
-指令 格式 功能 示例
+条件转移
 
-LOOP LOOP 目标 CX≠0则循环 LOOP AGAIN
+JZ  label         ; ZF=1时转移
+JNZ label         ; ZF=0时转移
+JC  label         ; CF=1时转移
+JA  label         ; 高于转移(无符号)
+JG  label         ; 大于转移(有符号)
 
-LOOPZ/LOOPE LOOPZ 目标 CX≠0且ZF=1循环 LOOPZ NEXT
 
-LOOPNZ/LOOPNE LOOPNZ 目标 CX≠0且ZF=0循环 LOOPNZ SEARCH
+循环指令
 
-JCXZ JCXZ 目标 CX=0则跳转 JCXZ EXIT
+LOOP label        ; CX-1, 若CX≠0则转移
+LOOPZ label       ; CX-1, 若CX≠0且ZF=1则转移
+LOOPNZ label      ; CX-1, 若CX≠0且ZF=0则转移
 
-六、处理器控制指令（Processor Control）
 
-1. 标志操作
+6. 串操作指令
 
-指令 功能 示例
+MOVSB/MOVSW - 串传送
 
-STC 置进位标志 CF=1 STC
+MOVSB            ; [DS:SI] → [ES:DI], 修改SI/DI
+MOVSW            ; 传送字
+REP MOVSB        ; 重复传送
 
-CLC 清进位标志 CF=0 CLC
 
-CMC 进位标志取反 CMC
+CMPSB/CMPSW - 串比较
 
-STD 置方向标志 DF=1 STD
+CMPSB            ; [DS:SI] - [ES:DI], 修改SI/DI
+REPZ CMPSB       ; 相等时继续比较
 
-CLD 清方向标志 DF=0 CLD
 
-STI 开中断 IF=1 STI
+SCASB/SCASW - 串扫描
 
-CLI 关中断 IF=0 CLI
-2. 其他控制
-指令 功能 示例
+SCASB            ; AL - [ES:DI], 修改DI
+REPNZ SCASB      ; 不相等时继续扫描
 
-NOP 空操作 NOP
 
-HLT 暂停CPU HLT
+7. 处理器控制指令
 
-WAIT 等待信号 WAIT
+标志操作
 
-ESC 交权（协处理器） ESC
+STC              ; CF ← 1
+CLC              ; CF ← 0
+STD              ; DF ← 1 (地址递减)
+CLD              ; DF ← 0 (地址递增)
+STI              ; IF ← 1 (开中断)
+CLI              ; IF ← 0 (关中断)
 
-LOCK 总线锁定前缀 LOCK XCHG
-七、中断指令（Interrupt）
-指令 格式 功能 示例
 
-INT INT n 软件中断 INT 21h
+五、指令前缀
 
-INTO INTO 溢出中断 INTO
+1. 段超越前缀
 
-IRET IRET 中断返回 IRET
+ES: MOV AL, [BX]   ; ES段
+CS: JMP label      ; CS段
+SS: MOV AX, [BP]   ; SS段
+DS: MOV [DI], AX   ; DS段
 
-八、指令详细参数表
 
-寻址方式：
+2. 重复前缀
 
-立即数寻址:    MOV AX, 1234h
-寄存器寻址:    MOV AX, BX
-直接寻址:      MOV AX, [1234h]
-寄存器间接:    MOV AX, [BX]
-寄存器相对:    MOV AX, [BX+10]
-基址变址:      MOV AX, [BX+SI]
-相对基址变址:  MOV AX, [BX+SI+10]
+REP MOVSB         ; 重复执行
+REPZ CMPSB        ; 为零/相等时重复
+REPNZ SCASB       ; 不为零/不相等时重复
 
 
-操作数类型：
+3. 锁定前缀
 
-MOV AL, BL      ; 8位寄存器
-MOV AX, BX      ; 16位寄存器
-MOV AX, [SI]    ; 内存操作数
-MOV AX, 100h    ; 立即数
+LOCK XCHG AL, [BX] ; 锁定总线
 
 
-九、实用指令速查表
+六、操作数类型说明
 
-常用指令组合：
+1. 数据类型
 
-功能 示例代码
+BYTE PTR [BX]     ; 字节类型
+WORD PTR [SI]     ; 字类型
+DWORD PTR [DI]    ; 双字类型
 
-清零寄存器 XOR AX, AX
 
-寄存器取反 NOT AX
+2. 段间操作
 
-寄存器取负 NEG AX
+JMP FAR PTR label      ; 段间直接转移
+JMP DWORD PTR [BX]     ; 段间间接转移
+CALL FAR PTR procedure ; 段间调用
 
-测试奇偶 TEST AL, 01h
 
-乘10快速 MOV BX, AX<br>SHL AX, 1<br>SHL AX, 1<br>ADD AX, BX<br>SHL AX, 1
+七、指令编码结构
 
-除2（有符号） SAR AX, 1
+8086指令的一般编码格式：
 
-除2（无符号） SHR AX, 1
+[前缀] [操作码] [寻址方式字节] [位移量] [立即数]
 
-交换两变量 XCHG AX, BX
 
-数组清零 MOV CX, 100<br>LEA DI, ARRAY<br>XOR AX, AX<br>REP STOSW
-十、指令周期参考（4.77MHz）
-指令类型 典型周期数 说明
+示例分析：
 
-寄存器操作 2-4 MOV, ADD, SUB等
+MOV AX, [BX+SI+1234H]
+; 编码格式：
+; 操作码: 1000101w
+; MOD-REG-R/M: 00-000-000
+; 位移量低8位: 34H
+; 位移量高8位: 12H
 
-内存操作 10-20 访问内存额外时间
 
-跳转指令 15-20 跳转需要清空流水线
+八、注意事项
 
-乘法指令 70-130 乘法较慢
+1. 操作数方向：目标操作数在前，源操作数在后
+2. 类型匹配：操作数类型必须一致
+3. 段寄存器限制：段寄存器不能直接与立即数传送
+4. 标志影响：大部分指令会影响标志寄存器
+5. 寻址限制：某些寻址方式只能用于特定寄存器
 
-除法指令 80-190 除法最慢
+九、完整示例
 
-串操作 每个字节9-25 重复时效率高
+DATA SEGMENT
+    ARRAY DW 10 DUP(?)
+    COUNT EQU 10
+DATA ENDS
 
-十一、完整编程示例
-
-; 示例：字符串转大写
-.MODEL SMALL
-.STACK 100H
-.DATA
-    STR DB 'hello world$'
-.CODE
+CODE SEGMENT
+    ASSUME CS:CODE, DS:DATA
+    
 START:
-    MOV AX, @DATA
-    MOV DS, AX
-    MOV ES, AX        ; 设置ES
+    MOV AX, DATA
+    MOV DS, AX           ; 初始化DS
     
-    ; 使用串操作
-    LEA DI, STR       ; DI指向字符串
-    MOV AL, '$'       ; 结束符
-    CLD               ; 方向向前
+    MOV CX, COUNT        ; 设置循环次数
+    MOV SI, OFFSET ARRAY ; SI指向数组
+    XOR AX, AX           ; 清AX用于求和
     
-CONVERT_LOOP:
-    CMP [DI], AL      ; 是否结束？
-    JE DONE
-    CMP BYTE PTR [DI], 'a'
-    JB NEXT_CHAR
-    CMP BYTE PTR [DI], 'z'
-    JA NEXT_CHAR
-    SUB BYTE PTR [DI], 20h  ; 转大写
-NEXT_CHAR:
-    INC DI
-    JMP CONVERT_LOOP
+SUM_LOOP:
+    ADD AX, [SI]         ; 累加
+    ADD SI, 2            ; 指向下一个字
+    LOOP SUM_LOOP        ; 循环
     
-DONE:
-    ; 显示结果
-    MOV AH, 09H
-    LEA DX, STR
+    MOV AH, 4CH          ; 程序结束
     INT 21H
-    
-    MOV AH, 4CH
-    INT 21H
+CODE ENDS
 END START
 
 
-十二、注意事项
-
-1. 段超越前缀：
-   MOV AL, DS:[BX]    ; 默认
-   MOV AL, ES:[BX]    ; 段超越
-   MOV AL, CS:[BX]    ; 代码段
-   MOV AL, SS:[BX]    ; 堆栈段
-   
-
-2. 操作数大小：
-   BYTE PTR [SI]      ; 字节操作
-   WORD PTR [DI]      ; 字操作
-   
-
-3. 地址长度前缀：
-   ; 在32位模式下用66h前缀选择16位操作
-   DB 66h
-   MOV AX, BX
-   
-
-十三、不常用但重要的指令
-
-指令 功能 使用场景
-
-XLAT 查表转换 代码转换表
-
-BOUND 检查数组边界 数组越界检查
-
-ENTER 建立堆栈帧 高级语言支持
-
-LEAVE 撤销堆栈帧 高级语言支持
+这个详细说明涵盖了8086汇编指令的主要格式和参数形式，包括各种寻址方式、指令类别和实际使用示例。
