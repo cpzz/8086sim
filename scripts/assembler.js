@@ -4,6 +4,7 @@ class Assembler {
         this.symbols = {}; // 符号表，用于存储标签和地址
         this.instructions = []; // 解析后的指令列表
         this.dataSegments = []; // 数据段信息
+        this.codePaddings = []; // 存放代码段的对齐填充（如 EVEN 插入的 NOP）
         this.equDefinitions = []; // EQU常量定义
         this.currentSegment = 'code'; // 当前所在的段（data/code）
         this.model = 'small'; // 默认内存模型
@@ -130,8 +131,36 @@ class Assembler {
                 continue;
             }
 
+            // 去掉行内注释再小写比较，保证像 "EVEN ; 注释" 也能识别
+            const lowerLine = line.split(';')[0].trim().toLowerCase();
+
+            // 检查是否是 EVEN 伪指令（偶地址对齐）- 优先处理
+            if (lowerLine === 'even') {
+                if (address % 2 !== 0) {
+                    // 当前地址是奇数，需要+1对齐到偶地址
+                    if (this.currentSegment === 'data') {
+                        // 在数据段，添加填充字节
+                        this.dataSegments.push({
+                            offset: address,
+                            data: [0],  // 填充字节
+                            label: '',
+                            originalLine: '; EVEN alignment padding'
+                        });
+                    } else if (this.currentSegment === 'code') {
+                        // 在代码段，为了保证执行流正确，插入一个 NOP 填充
+                        this.codePaddings.push({
+                            offset: address,
+                            data: [0x90], // NOP
+                            originalLine: '; EVEN alignment NOP padding'
+                        });
+                    }
+                    // 无论是数据段还是代码段，地址都+1
+                    address++;
+                }
+                continue;
+            }
+
             // 检查是否是 DB 数据定义
-            const lowerLine = line.toLowerCase();
             let dbIndex = lowerLine.indexOf(' db ');
             // 处理行首没有标签的情况，如 "DB 'string'"
             if (dbIndex === -1 && lowerLine.startsWith('db ')) {
@@ -191,6 +220,78 @@ class Assembler {
                 continue;
             }
 
+            // 检查是否是 DQ 数据定义（四字，8字节）
+            let dqIndex = lowerLine.indexOf(' dq ');
+            if (dqIndex === -1 && lowerLine.startsWith('dq ')) {
+                dqIndex = 0;
+            }
+            if (dqIndex !== -1) {
+                const potentialLabel = line.substring(0, dqIndex).trim();
+                if (potentialLabel && !potentialLabel.startsWith(';')) {
+                    this.symbols[potentialLabel] = address;
+                }
+
+                const dataPart = line.substring(dqIndex + 4).trim();
+                const data = this.parseDQ(dataPart);
+
+                address += data.length;
+                continue;
+            }
+
+            // 检查是否是 DT 数据定义（十字节，10字节）
+            let dtIndex = lowerLine.indexOf(' dt ');
+            if (dtIndex === -1 && lowerLine.startsWith('dt ')) {
+                dtIndex = 0;
+            }
+            if (dtIndex !== -1) {
+                const potentialLabel = line.substring(0, dtIndex).trim();
+                if (potentialLabel && !potentialLabel.startsWith(';')) {
+                    this.symbols[potentialLabel] = address;
+                }
+
+                const dataPart = line.substring(dtIndex + 4).trim();
+                const data = this.parseDT(dataPart);
+
+                address += data.length;
+                continue;
+            }
+
+            // 检查是否是 ORG 伪指令（设置位置计数器）
+            if (lowerLine.startsWith('org ')) {
+                const orgValue = line.substring(4).trim();
+                const newAddress = this.parseImmediate(orgValue);
+                if (!isNaN(newAddress)) {
+                    address = newAddress;
+                }
+                continue;
+            }
+
+            // 检查是否是 LABEL 伪指令
+            // 格式：名称 LABEL 类型
+            const labelMatch = line.match(/^(\w+)\s+label\s+(byte|word|dword|qword|tbyte|near|far)/i);
+            if (labelMatch) {
+                const labelName = labelMatch[1];
+                this.symbols[labelName] = address;
+                continue;
+            }
+
+            // 检查是否是 = (等号赋值) 伪指令
+            // 格式：符号 = 表达式
+            const equalMatch = line.match(/^(\w+)\s*=\s*(.+)$/);
+            if (equalMatch && !line.toLowerCase().includes(' equ ')) {
+                const label = equalMatch[1].trim();
+                const valuePart = equalMatch[2].trim();
+                const value = this.parseImmediate(valuePart);
+                this.symbols[label] = value;
+                // = 可以重新定义，所以不需要检查是否已存在
+                this.equDefinitions.push({
+                    label: label,
+                    value: value,
+                    originalLine: line.trim()
+                });
+                continue;
+            }
+
             // 检查是否是 EQU 常量定义
             const equIndex = line.toLowerCase().indexOf(' equ ');
             if (equIndex !== -1 && equIndex > 0) {
@@ -238,6 +339,8 @@ class Assembler {
 
         // 第二遍：解析指令并生成机器码
         address = 0;
+        // 清除之前的代码填充（将由第一遍重新填充）
+        this.codePaddings = this.codePaddings || [];
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
             if (line === '' || line.startsWith(';')) {
@@ -278,7 +381,8 @@ class Assembler {
             }
 
             // 检查是否是 DB 数据定义（只在数据段处理）
-            const lowerLine2 = line.toLowerCase();
+            // 去掉行内注释再小写比较，保证像 "EVEN ; 注释" 也能识别
+            const lowerLine2 = line.split(';')[0].trim().toLowerCase();
             let dbIndex = lowerLine2.indexOf(' db ');
             // 处理行首没有标签的情况，如 "DB 'string'"
             if (dbIndex === -1 && lowerLine2.startsWith('db ')) {
@@ -371,6 +475,108 @@ class Assembler {
                 continue;
             }
 
+            // 检查是否是 DQ 数据定义（只在数据段处理）
+            let dqIndex = lowerLine2.indexOf(' dq ');
+            if (dqIndex === -1 && lowerLine2.startsWith('dq ')) {
+                dqIndex = 0;
+            }
+            if (dqIndex !== -1 && this.currentSegment === 'data') {
+                const dataPart = line.substring(dqIndex + 4).trim();
+                const data = this.parseDQ(dataPart);
+
+                let label = '';
+                if (dqIndex > 0) {
+                    const potentialLabel = line.substring(0, dqIndex).trim();
+                    if (potentialLabel && !potentialLabel.startsWith(';')) {
+                        label = potentialLabel;
+                    }
+                }
+
+                this.dataSegments.push({
+                    offset: address,
+                    data: data,
+                    label: label,
+                    originalLine: line.trim()
+                });
+
+                address += data.length;
+                continue;
+            }
+
+            // 检查是否是 DT 数据定义（只在数据段处理）
+            let dtIndex = lowerLine2.indexOf(' dt ');
+            if (dtIndex === -1 && lowerLine2.startsWith('dt ')) {
+                dtIndex = 0;
+            }
+            if (dtIndex !== -1 && this.currentSegment === 'data') {
+                const dataPart = line.substring(dtIndex + 4).trim();
+                const data = this.parseDT(dataPart);
+
+                let label = '';
+                if (dtIndex > 0) {
+                    const potentialLabel = line.substring(0, dtIndex).trim();
+                    if (potentialLabel && !potentialLabel.startsWith(';')) {
+                        label = potentialLabel;
+                    }
+                }
+
+                this.dataSegments.push({
+                    offset: address,
+                    data: data,
+                    label: label,
+                    originalLine: line.trim()
+                });
+
+                address += data.length;
+                continue;
+            }
+
+            // 检查是否是 ORG 伪指令
+            if (lowerLine2.startsWith('org ')) {
+                const orgValue = line.substring(4).trim();
+                const newAddress = this.parseImmediate(orgValue);
+                if (!isNaN(newAddress)) {
+                    address = newAddress;
+                }
+                continue;
+            }
+
+            // 检查是否是 EVEN 伪指令
+            if (lowerLine2 === 'even') {
+                if (address % 2 !== 0) {
+                    // 当前地址是奇数，地址+1对齐到偶地址
+                    if (this.currentSegment === 'code') {
+                        // 在代码段，插入一个 NOP 指令到指令列表，带注释说明用于 EVEN
+                        const nopInstr = {
+                            address: address,
+                            opcode: 'NOP',
+                            operands: [],
+                            machineCode: [0x90],
+                            length: 1,
+                            originalLine: 'NOP ; EVEN alignment padding'
+                        };
+                        this.instructions.push(nopInstr);
+                        // 写入内存（临时区域），使第一遍/第二遍一致
+                        this.writeInstructionToMemory(nopInstr);
+                    }
+                    // 数据段的填充已经在第一遍添加到 dataSegments 中
+                    address++;
+                }
+                continue; // 跳过，不生成其他指令
+            }
+
+            // 检查是否是 LABEL 伪指令（第二遍跳过，已在第一遍处理）
+            const labelMatch2 = line.match(/^(\w+)\s+label\s+(byte|word|dword|qword|tbyte|near|far)/i);
+            if (labelMatch2) {
+                continue;
+            }
+
+            // 检查是否是 = (等号赋值) 伪指令（第二遍跳过，已在第一遍处理）
+            const equalMatch2 = line.match(/^(\w+)\s*=\s*(.+)$/);
+            if (equalMatch2 && !line.toLowerCase().includes(' equ ')) {
+                continue;
+            }
+
             // 检查是否是 EQU 常量定义（第二遍跳过，已在第一遍处理）
             const equIndex = line.toLowerCase().indexOf(' equ ');
             if (equIndex !== -1 && equIndex > 0) {
@@ -395,10 +601,46 @@ class Assembler {
         // 简单实现，实际需要更复杂的解析
         const lineWithoutComment = line.split(';')[0].trim();
 
+        const lowerLine = lineWithoutComment.toLowerCase();
+
         // 处理 DB 数据定义
-        if (lineWithoutComment.toLowerCase().startsWith('db')) {
+        if (lowerLine.startsWith('db')) {
             const dataPart = lineWithoutComment.substring(2).trim();
             return this.parseDB(dataPart).length;
+        }
+
+        // 处理 DW 数据定义
+        if (lowerLine.startsWith('dw')) {
+            const dataPart = lineWithoutComment.substring(2).trim();
+            return this.parseDW(dataPart).length;
+        }
+
+        // 处理 DD 数据定义
+        if (lowerLine.startsWith('dd')) {
+            const dataPart = lineWithoutComment.substring(2).trim();
+            return this.parseDD(dataPart).length;
+        }
+
+        // 处理 DQ 数据定义（四字，8字节）
+        if (lowerLine.startsWith('dq')) {
+            const dataPart = lineWithoutComment.substring(2).trim();
+            return this.parseDQ(dataPart).length;
+        }
+
+        // 处理 DT 数据定义（十字节，10字节）
+        if (lowerLine.startsWith('dt')) {
+            const dataPart = lineWithoutComment.substring(2).trim();
+            return this.parseDT(dataPart).length;
+        }
+
+        // 处理 ORG 伪指令
+        if (lowerLine.startsWith('org ')) {
+            return 0; // ORG 不占用空间
+        }
+
+        // 处理 EVEN 伪指令
+        if (lowerLine === 'even') {
+            return 0; // EVEN 不占用空间，只是对齐
         }
 
         const opcodeEndIndex = lineWithoutComment.indexOf(' ');
@@ -782,11 +1024,111 @@ class Assembler {
         return result;
     }
 
+    // 解析 DQ 数据定义（四字，8字节）
+    parseDQ(dataPart) {
+        const result = [];
+        const dataWithoutComment = dataPart.split(';')[0].trim();
+        const values = [];
+        let currentValue = '';
+
+        for (let i = 0; i < dataWithoutComment.length; i++) {
+            const char = dataWithoutComment[i];
+            if (char === ',' && !currentValue.includes('"') && !currentValue.includes("'")) {
+                values.push(currentValue.trim());
+                currentValue = '';
+            } else {
+                currentValue += char;
+            }
+        }
+        if (currentValue.trim() !== '') {
+            values.push(currentValue.trim());
+        }
+
+        for (const value of values) {
+            const trimmedValue = value.trim();
+            
+            // 检查是否是64位十六进制值（需要特殊处理，因为JS的number无法精确表示）
+            let hexStr = null;
+            if (trimmedValue.startsWith('0x') || trimmedValue.startsWith('0X')) {
+                hexStr = trimmedValue.substring(2);
+            } else if (trimmedValue.endsWith('h') || trimmedValue.endsWith('H')) {
+                hexStr = trimmedValue.slice(0, -1);
+            }
+            
+            if (hexStr && hexStr.length > 8) {
+                // 64位十六进制值，手动解析为高32位和低32位
+                // 补齐到16个字符
+                hexStr = hexStr.padStart(16, '0');
+                const lowStr = hexStr.substring(8, 16);   // 低8位字符
+                const highStr = hexStr.substring(0, 8);   // 高8位字符
+                
+                const low = parseInt(lowStr, 16) || 0;
+                const high = parseInt(highStr, 16) || 0;
+                
+                // 小端序输出：低字节在前
+                // 低32位（4字节）
+                result.push((low >> 0) & 0xff);
+                result.push((low >> 8) & 0xff);
+                result.push((low >> 16) & 0xff);
+                result.push((low >> 24) & 0xff);
+                // 高32位（4字节）
+                result.push((high >> 0) & 0xff);
+                result.push((high >> 8) & 0xff);
+                result.push((high >> 16) & 0xff);
+                result.push((high >> 24) & 0xff);
+            } else {
+                // 普通值，使用parseImmediate
+                const parsedValue = this.parseImmediate(trimmedValue);
+                // 小端序，低字节在前
+                for (let i = 0; i < 8; i++) {
+                    result.push(isNaN(parsedValue) ? 0 : ((parsedValue >> (i * 8)) & 0xff));
+                }
+            }
+        }
+        return result;
+    }
+
+    // 解析 DT 数据定义（十字节，10字节）
+    parseDT(dataPart) {
+        const result = [];
+        const dataWithoutComment = dataPart.split(';')[0].trim();
+        const values = [];
+        let currentValue = '';
+
+        for (let i = 0; i < dataWithoutComment.length; i++) {
+            const char = dataWithoutComment[i];
+            if (char === ',' && !currentValue.includes('"') && !currentValue.includes("'")) {
+                values.push(currentValue.trim());
+                currentValue = '';
+            } else {
+                currentValue += char;
+            }
+        }
+        if (currentValue.trim() !== '') {
+            values.push(currentValue.trim());
+        }
+
+        for (const value of values) {
+            const parsedValue = this.parseImmediate(value);
+            // 小端序，低字节在前（10字节）
+            for (let i = 0; i < 10; i++) {
+                result.push(isNaN(parsedValue) ? 0 : ((parsedValue >> (i * 8)) & 0xff));
+            }
+        }
+        return result;
+    }
+
     // 解析单个指令
     parseInstruction(line, address) {
         const originalLine = line; // 保存原始行
         // 先移除注释，然后分割指令
         const lineWithoutComment = line.split(';')[0].trim();
+
+        // 检查是否是 EVEN 伪指令（不应该作为可执行指令）
+        if (lineWithoutComment.toLowerCase() === 'even') {
+            return null; // EVEN 不是可执行指令
+        }
+
         // 分割操作码和操作数
         const opcodeEndIndex = lineWithoutComment.indexOf(' ');
         const opcode = opcodeEndIndex === -1 ? lineWithoutComment.toLowerCase() : lineWithoutComment.substring(0, opcodeEndIndex).toLowerCase();
@@ -1587,11 +1929,11 @@ class Assembler {
 
                 // 支持MOV立即数寻址（16位寄存器）
                 if (operands[0] === 'ax' && this.isImmediate(operands[1])) {
-                    const imm16 = this.parseImmediate(operands[1]);
+                    const imm16 = this.parseImmediate(originalOperands[1]);
                     return {
                         address,
                         opcode: 'MOV',
-                        operands: ['AX', operands[1]],
+                        operands: ['AX', originalOperands[1]],
                         machineCode: [0xb8, imm16 & 0xff, (imm16 >> 8) & 0xff],
                         length: 3,
                         originalLine: originalLine.trim()
@@ -1729,77 +2071,77 @@ class Assembler {
                     }
                 }
                 if (operands[0] === 'bx' && this.isImmediate(operands[1])) {
-                    const imm16 = this.parseImmediate(operands[1]);
+                    const imm16 = this.parseImmediate(originalOperands[1]);
                     return {
                         address,
                         opcode: 'MOV',
-                        operands: ['BX', operands[1]],
+                        operands: ['BX', originalOperands[1]],
                         machineCode: [0xbb, imm16 & 0xff, (imm16 >> 8) & 0xff],
                         length: 3,
                         originalLine: originalLine.trim()
                     };
                 }
                 if (operands[0] === 'cx' && this.isImmediate(operands[1])) {
-                    const imm16 = this.parseImmediate(operands[1]);
+                    const imm16 = this.parseImmediate(originalOperands[1]);
                     return {
                         address,
                         opcode: 'MOV',
-                        operands: ['CX', operands[1]],
+                        operands: ['CX', originalOperands[1]],
                         machineCode: [0xb9, imm16 & 0xff, (imm16 >> 8) & 0xff],
                         length: 3,
                         originalLine: originalLine.trim()
                     };
                 }
                 if (operands[0] === 'dx' && this.isImmediate(operands[1])) {
-                    const imm16 = this.parseImmediate(operands[1]);
+                    const imm16 = this.parseImmediate(originalOperands[1]);
                     return {
                         address,
                         opcode: 'MOV',
-                        operands: ['DX', operands[1]],
+                        operands: ['DX', originalOperands[1]],
                         machineCode: [0xba, imm16 & 0xff, (imm16 >> 8) & 0xff],
                         length: 3,
                         originalLine: originalLine.trim()
                     };
                 }
                 if (operands[0] === 'si' && this.isImmediate(operands[1])) {
-                    const imm16 = this.parseImmediate(operands[1]);
+                    const imm16 = this.parseImmediate(originalOperands[1]);
                     return {
                         address,
                         opcode: 'MOV',
-                        operands: ['SI', operands[1]],
+                        operands: ['SI', originalOperands[1]],
                         machineCode: [0xbe, imm16 & 0xff, (imm16 >> 8) & 0xff],
                         length: 3,
                         originalLine: originalLine.trim()
                     };
                 }
                 if (operands[0] === 'di' && this.isImmediate(operands[1])) {
-                    const imm16 = this.parseImmediate(operands[1]);
+                    const imm16 = this.parseImmediate(originalOperands[1]);
                     return {
                         address,
                         opcode: 'MOV',
-                        operands: ['DI', operands[1]],
+                        operands: ['DI', originalOperands[1]],
                         machineCode: [0xbf, imm16 & 0xff, (imm16 >> 8) & 0xff],
                         length: 3,
                         originalLine: originalLine.trim()
                     };
                 }
                 if (operands[0] === 'bp' && this.isImmediate(operands[1])) {
-                    const imm16 = this.parseImmediate(operands[1]);
+                    const imm16 = this.parseImmediate(originalOperands[1]);
                     return {
                         address,
                         opcode: 'MOV',
-                        operands: ['BP', operands[1]],
+                        operands: ['BP', originalOperands[1]],
                         machineCode: [0xbd, imm16 & 0xff, (imm16 >> 8) & 0xff],
                         length: 3,
                         originalLine: originalLine.trim()
                     };
                 }
                 if (operands[0] === 'sp' && this.isImmediate(operands[1])) {
-                    const imm16 = this.parseImmediate(operands[1]);
+                    const imm16 = this.parseImmediate(originalOperands[1]);
                     return {
                         address,
                         opcode: 'MOV',
-                        operands: ['SP', operands[1]],
+                        operands: ['SP', originalOperands[1]],
                         machineCode: [0xbc, imm16 & 0xff, (imm16 >> 8) & 0xff],
                         length: 3,
                         originalLine: originalLine.trim()
@@ -1807,88 +2149,88 @@ class Assembler {
                 }
                 // 支持MOV立即数寻址（8位寄存器）
                 if (operands[0] === 'al' && this.isImmediate(operands[1])) {
-                    const imm8 = this.parseImmediate(operands[1]);
+                    const imm8 = this.parseImmediate(originalOperands[1]);
                     return {
                         address,
                         opcode: 'MOV',
-                        operands: ['AL', operands[1]],
+                        operands: ['AL', originalOperands[1]],
                         machineCode: [0xb0, imm8],
                         length: 2,
                         originalLine: originalLine.trim()
                     };
                 }
                 if (operands[0] === 'ah' && this.isImmediate(operands[1])) {
-                    const imm8 = this.parseImmediate(operands[1]);
+                    const imm8 = this.parseImmediate(originalOperands[1]);
                     return {
                         address,
                         opcode: 'MOV',
-                        operands: ['AH', operands[1]],
+                        operands: ['AH', originalOperands[1]],
                         machineCode: [0xb4, imm8],
                         length: 2,
                         originalLine: originalLine.trim()
                     };
                 }
                 if (operands[0] === 'bl' && this.isImmediate(operands[1])) {
-                    const imm8 = this.parseImmediate(operands[1]);
+                    const imm8 = this.parseImmediate(originalOperands[1]);
                     return {
                         address,
                         opcode: 'MOV',
-                        operands: ['BL', operands[1]],
+                        operands: ['BL', originalOperands[1]],
                         machineCode: [0xb3, imm8],
                         length: 2,
                         originalLine: originalLine.trim()
                     };
                 }
                 if (operands[0] === 'bh' && this.isImmediate(operands[1])) {
-                    const imm8 = this.parseImmediate(operands[1]);
+                    const imm8 = this.parseImmediate(originalOperands[1]);
                     return {
                         address,
                         opcode: 'MOV',
-                        operands: ['BH', operands[1]],
+                        operands: ['BH', originalOperands[1]],
                         machineCode: [0xb7, imm8],
                         length: 2,
                         originalLine: originalLine.trim()
                     };
                 }
                 if (operands[0] === 'cl' && this.isImmediate(operands[1])) {
-                    const imm8 = this.parseImmediate(operands[1]);
+                    const imm8 = this.parseImmediate(originalOperands[1]);
                     return {
                         address,
                         opcode: 'MOV',
-                        operands: ['CL', operands[1]],
+                        operands: ['CL', originalOperands[1]],
                         machineCode: [0xb1, imm8],
                         length: 2,
                         originalLine: originalLine.trim()
                     };
                 }
                 if (operands[0] === 'ch' && this.isImmediate(operands[1])) {
-                    const imm8 = this.parseImmediate(operands[1]);
+                    const imm8 = this.parseImmediate(originalOperands[1]);
                     return {
                         address,
                         opcode: 'MOV',
-                        operands: ['CH', operands[1]],
+                        operands: ['CH', originalOperands[1]],
                         machineCode: [0xb5, imm8],
                         length: 2,
                         originalLine: originalLine.trim()
                     };
                 }
                 if (operands[0] === 'dl' && this.isImmediate(operands[1])) {
-                    const imm8 = this.parseImmediate(operands[1]);
+                    const imm8 = this.parseImmediate(originalOperands[1]);
                     return {
                         address,
                         opcode: 'MOV',
-                        operands: ['DL', operands[1]],
+                        operands: ['DL', originalOperands[1]],
                         machineCode: [0xb2, imm8],
                         length: 2,
                         originalLine: originalLine.trim()
                     };
                 }
                 if (operands[0] === 'dh' && this.isImmediate(operands[1])) {
-                    const imm8 = this.parseImmediate(operands[1]);
+                    const imm8 = this.parseImmediate(originalOperands[1]);
                     return {
                         address,
                         opcode: 'MOV',
-                        operands: ['DH', operands[1]],
+                        operands: ['DH', originalOperands[1]],
                         machineCode: [0xb6, imm8],
                         length: 2,
                         originalLine: originalLine.trim()
@@ -1916,7 +2258,7 @@ class Assembler {
                 }
 
                 if (this.isImmediate(operands[1])) {
-                    const imm16 = this.parseImmediate(operands[1]);
+                    const imm16 = this.parseImmediate(originalOperands[1]);
                     // 判断是否是8位立即数
                     let is8BitImm = imm16 >= 0 && imm16 <= 255;
                     // 如果指定了 word ptr，强制使用 16 位操作
@@ -4400,6 +4742,14 @@ class Assembler {
     
     // 解析立即数
     parseImmediate(value) {
+        // 处理字符字面量 'X' 或 "X"
+        if ((value.startsWith("'") && value.endsWith("'")) || (value.startsWith('"') && value.endsWith('"'))) {
+            const char = value.slice(1, -1);
+            if (char.length > 0) {
+                return char.charCodeAt(0);
+            }
+        }
+
         // 检查是否是标签（大小写不敏感）
         const valueLower = value.toLowerCase();
         for (const key in this.symbols) {

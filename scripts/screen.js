@@ -1,9 +1,10 @@
 
 // 更新UI显示输出
 function updateDisplayOutput() {
-    // 如果当前正好在屏幕tab，则更新显示
-    if (currentLeftTab === 'screen') {
-        updateUIDisplay();
+    // 更新显示（无论当前在哪个标签页）
+    const uiDisplayGrid = document.getElementById('ui-display-grid');
+    if (uiDisplayGrid) {
+        renderDisplayControl(uiDisplayGrid);
     }
 }
 
@@ -110,10 +111,12 @@ function renderDisplayControl(memoryGrid) {
         </div>
     `;
 
-    // 在光标位置添加光标类
-    const cursorLineElement = memoryGrid.querySelector(`.display-line:nth-child(${cursorLine + 1}) .display-char:nth-child(${cursorCol + 1})`);
-    if (cursorLineElement) {
-        cursorLineElement.classList.add('cursor-active');
+    // 在光标位置添加光标类（确保光标位置有效）
+    if (cursorLine < ROWS && cursorCol < COLS) {
+        const cursorLineElement = memoryGrid.querySelector(`.display-line:nth-child(${cursorLine + 1}) .display-char:nth-child(${cursorCol + 1})`);
+        if (cursorLineElement) {
+            cursorLineElement.classList.add('cursor-active');
+        }
     }
 }
 

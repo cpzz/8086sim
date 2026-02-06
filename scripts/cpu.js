@@ -2030,6 +2030,31 @@ class CPU8086 {
                     }
                 }
                 break;
+            case 0x74: // JZ/JE short
+                const offset8jz = this.readMemory8(currentAddress + 1);
+                if (this.flags.zf === 1) {
+                    // 符号扩展
+                    const signedOffsetJz = offset8jz > 0x7f ? offset8jz - 0x100 : offset8jz;
+                    // 跳转到目标地址：当前IP + 指令长度 + 偏移量
+                    this.ip = this.ip + 2 + signedOffsetJz;
+                    this.ip &= 0xffff;
+                    instructionLength = 0; // 不增加IP，因为已经手动设置了
+                } else {
+                    instructionLength = 2;
+                }
+                break;
+            case 0x75: // JNZ/JNE short
+                const offset75 = this.readMemory8(currentAddress + 1);
+                const signedOffset75 = offset75 > 0x7f ? offset75 - 0x100 : offset75;
+                if (!this.flags.zf) {
+                    // ZF=0 时跳转
+                    this.ip = this.ip + 2 + signedOffset75;
+                    this.ip &= 0xffff;
+                    instructionLength = 0;
+                } else {
+                    instructionLength = 2;
+                }
+                break;
             case 0x76: // JBE/JNA short
                 {
                     const off = this.readMemory8(currentAddress + 1);
@@ -2127,18 +2152,7 @@ class CPU8086 {
                 this.flags.of = (signedResult !== signedOperand1 - signedOperand2) ? 1 : 0;
                 instructionLength = 2;
                 break;
-            case 0x75: // JNZ/JNE short
-                const offset75 = this.readMemory8(currentAddress + 1);
-                const signedOffset75 = offset75 > 0x7f ? offset75 - 0x100 : offset75;
-                if (!this.flags.zf) {
-                    // ZF=0 时跳转
-                    this.ip = this.ip + 2 + signedOffset75;
-                    this.ip &= 0xffff;
-                    instructionLength = 0;
-                } else {
-                    instructionLength = 2;
-                }
-                break;
+
             case 0x3d: // CMP AX, Iv
                 const imm16cmp = this.readMemory16(currentAddress + 1);
                 const axcmp = this.getRegister('ax');
@@ -2278,19 +2292,6 @@ class CPU8086 {
                 this.ip = (this.ip + 2 + signedOffset) & 0xffff;
                 instructionLength = 0; // 不增加IP，因为已经手动设置了
                 break;
-            case 0x74: // JZ/JE short
-                const offset8jz = this.readMemory8(currentAddress + 1);
-                if (this.flags.zf === 1) {
-                    // 符号扩展
-                    const signedOffsetJz = offset8jz > 0x7f ? offset8jz - 0x100 : offset8jz;
-                    // 跳转到目标地址：当前IP + 指令长度 + 偏移量
-                    this.ip = this.ip + 2 + signedOffsetJz;
-                    this.ip &= 0xffff;
-                    instructionLength = 0; // 不增加IP，因为已经手动设置了
-                } else {
-                    instructionLength = 2;
-                }
-                break;
             case 0x7c: // JL short
                 const offset8jl = this.readMemory8(currentAddress + 1);
                 // JL: 小于跳转，条件是 SF !== OF
@@ -2299,6 +2300,20 @@ class CPU8086 {
                     const signedOffsetJl = offset8jl > 0x7f ? offset8jl - 0x100 : offset8jl;
                     // 跳转到目标地址：当前IP + 指令长度 + 偏移量
                     this.ip = this.ip + 2 + signedOffsetJl;
+                    this.ip &= 0xffff;
+                    instructionLength = 0; // 不增加IP，因为已经手动设置了
+                } else {
+                    instructionLength = 2;
+                }
+                break;
+            case 0x7d: // JGE short
+                const offset8jge = this.readMemory8(currentAddress + 1);
+                // JGE: 大于等于跳转，条件是 SF === OF
+                if (this.flags.sf === this.flags.of) {
+                    // 符号扩展
+                    const signedOffsetJge = offset8jge > 0x7f ? offset8jge - 0x100 : offset8jge;
+                    // 跳转到目标地址：当前IP + 指令长度 + 偏移量
+                    this.ip = this.ip + 2 + signedOffsetJge;
                     this.ip &= 0xffff;
                     instructionLength = 0; // 不增加IP，因为已经手动设置了
                 } else {
@@ -2717,6 +2732,72 @@ class CPU8086 {
                 }
                 instructionLength = instructionLength_c7;
                 break;
+            case 0xFE: { // INC/DEC r/m8 (Group 4)
+                const modrm = this.readMemory8(currentAddress + 1);
+                const reg = (modrm >> 3) & 0x7;  // Extension opcode: 0=INC, 1=DEC
+                const mod = (modrm >> 6) & 0x3;
+                const rm  = modrm & 0x7;
+                
+                if (mod !== 3) {
+                    console.error(`执行错误: 0xFE 不支持的寻址模式 mod=${mod}`);
+                    this.running = false;
+                    return false;
+                }
+                
+                // 8位寄存器映射: rm=0->AL, 1->CL, 2->DL, 3->BL, 4->AH, 5->CH, 6->DH, 7->BH
+                // 16位寄存器映射: AX, CX, DX, BX (低8位 AL,CL,DL,BL; 高8位 AH,CH,DH,BH)
+                const reg16ToName = ['ax', 'cx', 'dx', 'bx', 'ax', 'cx', 'dx', 'bx'];
+                const parentReg = reg16ToName[rm];
+                const isHigh = rm >= 4;
+                
+                const full = this.getRegister(parentReg);
+                let op8 = isHigh ? ((full >> 8) & 0xff) : (full & 0xff);
+                
+                let newOp8;
+                if (reg === 0) { // INC
+                    newOp8 = (op8 + 1) & 0xff;
+                } else if (reg === 1) { // DEC
+                    newOp8 = (op8 - 1) & 0xff;
+                } else {
+                    console.error(`执行错误: 0xFE 不支持的扩展操作码 ${reg}`);
+                    this.running = false;
+                    return false;
+                }
+                
+                // 更新寄存器
+                const newFull = isHigh ? ((full & 0x00ff) | (newOp8 << 8)) : ((full & 0xff00) | newOp8);
+                this.setRegister(parentReg, newFull);
+                
+                // 更新标志位
+                this.flags.zf = (newOp8 === 0) ? 1 : 0;
+                this.flags.sf = (newOp8 & 0x80) ? 1 : 0;
+                // 计算奇偶标志
+                let parity = 0;
+                let value = newOp8;
+                for (let i = 0; i < 8; i++) {
+                    parity += value & 1;
+                    value >>= 1;
+                }
+                this.flags.pf = (parity % 2 === 0) ? 1 : 0;
+                
+                // 辅助进位标志（低4位溢出）
+                if (reg === 0) { // INC
+                    this.flags.af = ((op8 & 0x0f) === 0x0f) ? 1 : 0;
+                } else { // DEC
+                    this.flags.af = ((op8 & 0x0f) === 0) ? 1 : 0;
+                }
+                
+                // 溢出标志
+                if (reg === 0) { // INC
+                    this.flags.of = (op8 === 0x7f) ? 1 : 0; // 从 0x7F 到 0x80 (127 to -128)
+                } else { // DEC
+                    this.flags.of = (op8 === 0x80) ? 1 : 0; // 从 0x80 到 0x7F (-128 to 127)
+                }
+                
+                instructionLength = 2;
+                break;
+            }
+            
             default:
                 // 所有未实现的指令都报非法指令错误
                 console.error(`执行错误: 遇到非法指令 0x${opcode.toString(16).padStart(2, '0')}`);
@@ -2724,8 +2805,8 @@ class CPU8086 {
                 return false;
         }
 
-        // 更新指令指针（RET、CALL、JMP指令已经设置了IP，不需要再增加）
-        if (opcode !== 0xc3 && opcode !== 0xE8 && opcode !== 0xeb) { // 0xc3=RET, 0xE8=CALL, 0xeb=JMP short
+        // 更新指令指针（某些指令已经设置了IP，instructionLength会设为0）
+        if (instructionLength > 0) {
             this.ip += instructionLength;
             this.ip &= 0xffff; // 确保16位
         }

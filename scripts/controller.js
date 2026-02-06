@@ -5,6 +5,7 @@ let assembler;
 let instructions = [];
 let breakpoints = new Set();
 let currentMemorySegment = 'cs'; // 当前选中的内存段
+let currentMemoryOffset = 0; // 当前内存显示的偏移地址
 let currentLeftTab = 'screen'; // 当前选中的左侧tab: screen, registers, memory
 let previousRegisterValues = {}; // 存储上一次的寄存器值
 let hasExecuted = false; // 跟踪是否已经执行了指令
@@ -100,7 +101,29 @@ function initUI() {
             updateMemoryDisplay(address);
         }
     });
-    
+
+    // 内存上页按钮（向上显示16行 = 256字节）
+    document.getElementById('memory-prev-btn').addEventListener('click', () => {
+        // 向上翻页，偏移地址减少256（16行）
+        const newOffset = Math.max(0, currentMemoryOffset - 256);
+        updateMemoryDisplay(newOffset);
+        // 更新输入框显示
+        document.getElementById('memory-address-input').value = newOffset.toString(16).toUpperCase();
+        // 更新按钮状态
+        updateMemoryPageButtons();
+    });
+
+    // 内存下页按钮（向下显示16行 = 256字节）
+    document.getElementById('memory-next-btn').addEventListener('click', () => {
+        // 向下翻页，偏移地址增加256（16行）
+        const newOffset = currentMemoryOffset + 256;
+        updateMemoryDisplay(newOffset);
+        // 更新输入框显示
+        document.getElementById('memory-address-input').value = newOffset.toString(16).toUpperCase();
+        // 更新按钮状态
+        updateMemoryPageButtons();
+    });
+
     // 内存地址输入回车事件
     document.getElementById('memory-address-input').addEventListener('keypress', (e) => {
         if (e.key === 'Enter') {
@@ -296,6 +319,7 @@ function stepExecution() {
     updateRegistersDisplay(registerOperations);
     updateMemoryDisplay(0x0000); // 显示从偏移地址0开始的内存内容
     updateInstructionsDisplay();
+    updateUIDisplay(); // 更新屏幕显示
     // 高亮寄存器值改变
     highlightRegisterChanges(registerOperations);
 
@@ -368,6 +392,7 @@ function runExecution() {
     updateRegistersDisplay(registerOperations);
     updateMemoryDisplay(0x0000); // 显示从偏移地址0开始的内存内容
     updateInstructionsDisplay();
+    updateUIDisplay(); // 更新屏幕显示
     // 更新按钮状态
     updateButtonStates(false);
     // 高亮寄存器值改变
@@ -617,13 +642,16 @@ function updateButtonStates(isRunning) {
 
 
 
-// 解析地址
+// 解析地址（始终按16进制处理，空白返回0）
 function parseAddress(addressStr) {
-    if (addressStr.startsWith('0x')) {
-        return parseInt(addressStr, 16);
-    } else {
-        return parseInt(addressStr, 10);
+    // 去除空白字符
+    const trimmed = addressStr.trim();
+    // 空白返回0
+    if (!trimmed) {
+        return 0;
     }
+    // 始终按16进制解析（不管有没有0x前缀）
+    return parseInt(trimmed, 16);
 }
 
 // 获取当前内存地址
@@ -761,10 +789,39 @@ function updateUIDisplay() {
     renderDisplayControl(uiDisplayGrid);
 }
 
+// 更新内存翻页按钮状态
+function updateMemoryPageButtons() {
+    const prevBtn = document.getElementById('memory-prev-btn');
+    const nextBtn = document.getElementById('memory-next-btn');
+
+    if (prevBtn) {
+        // 当偏移地址为0时，禁用"上页"按钮
+        prevBtn.disabled = (currentMemoryOffset === 0);
+    }
+
+    if (nextBtn) {
+        // 当最后一行显示0xFFFF时（偏移 >= 0xFF00），禁用"下页"按钮
+        // 每页显示16行(256字节)，最后一页起始地址为0xFF00
+        // 0xFF00 + 0xFF = 0xFFFF，确保0xFFFF在最后一行显示
+        nextBtn.disabled = (currentMemoryOffset >= 0xFF00);
+    }
+}
+
 // 更新内存显示
 function updateMemoryDisplay(offsetAddress) {
     const memoryGrid = document.getElementById('memory-grid');
     // 不再需要检查 display 段，因为用户界面现在是独立的tab
+
+    // 限制偏移地址在有效范围内（0 - 0xFFFF）
+    // 确保最后一页能显示到0xFFFF，最大起始地址为0xFF00
+    const maxOffset = 0xFF00;
+    const clampedOffset = Math.max(0, Math.min(offsetAddress, maxOffset));
+
+    // 保存当前偏移地址
+    currentMemoryOffset = clampedOffset;
+
+    // 更新翻页按钮状态
+    updateMemoryPageButtons();
 
     // 根据当前选中的段寄存器计算实际内存地址
     const segmentValue = cpu.getSegmentRegister(currentMemorySegment);
@@ -791,7 +848,7 @@ function updateMemoryDisplay(offsetAddress) {
         }
     } else {
         // 其他段：正常从低地址到高地址显示
-        startAddress = (segmentBase) + offsetAddress;
+        startAddress = (segmentBase) + clampedOffset;
         memoryRows = memory.getMemoryDump(startAddress, 256);
         // 重置堆栈显示基址（切换到其他段后再切回来时重新计算）
         stackDisplayBase = null;
