@@ -1773,6 +1773,30 @@ class CPU8086 {
                 this.setRegister('sp', this.getRegister('sp') + 2);
                 instructionLength = 1;
                 break;
+            case 0x56: // PUSH SI
+                this.setRegister('sp', this.getRegister('sp') - 2);
+                const stackAddress8 = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
+                this.writeMemory16(stackAddress8, this.getRegister('si'));
+                instructionLength = 1;
+                break;
+            case 0x57: // PUSH DI
+                this.setRegister('sp', this.getRegister('sp') - 2);
+                const stackAddress9 = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
+                this.writeMemory16(stackAddress9, this.getRegister('di'));
+                instructionLength = 1;
+                break;
+            case 0x5e: // POP SI
+                const stackAddress10 = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
+                this.setRegister('si', this.readMemory16(stackAddress10));
+                this.setRegister('sp', this.getRegister('sp') + 2);
+                instructionLength = 1;
+                break;
+            case 0x5f: // POP DI
+                const stackAddress11 = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
+                this.setRegister('di', this.readMemory16(stackAddress11));
+                this.setRegister('sp', this.getRegister('sp') + 2);
+                instructionLength = 1;
+                break;
             case 0xf3: { // REP前缀
                 // 读取下一个字节以确定是哪种串操作
                 const nextByte = this.readMemory8(currentAddress + 1);
@@ -3084,7 +3108,8 @@ class CPU8086 {
     // INT 21h AH=02h: 显示字符
     int21AH02DisplayChar() {
         const dl = this.getRegister('dx') & 0xff;
-        const char = String.fromCharCode(dl);
+        // 将 DOS 扩展 ASCII (Code Page 437) 转换为 Unicode
+        const char = this.dosCharToUnicode(dl);
         this.outputBuffer += char;
         if (this.updateOutputDisplay) {
             this.updateOutputDisplay();
@@ -3093,6 +3118,35 @@ class CPU8086 {
         this.ip += 2;
         this.ip &= 0xffff;
         return true;
+    }
+
+    // DOS 扩展 ASCII (Code Page 437) 到 Unicode 的转换
+    dosCharToUnicode(code) {
+        if (code < 128) {
+            // 0-127 是标准 ASCII，直接返回
+            return String.fromCharCode(code);
+        }
+        // 128-255 是扩展 ASCII，需要转换
+        // Code Page 437 到 Unicode 的映射表
+        const cp437ToUnicode = [
+            0x00C7, 0x00FC, 0x00E9, 0x00E2, 0x00E4, 0x00E0, 0x00E5, 0x00E7,
+            0x00EA, 0x00EB, 0x00E8, 0x00EF, 0x00EE, 0x00EC, 0x00C4, 0x00C5,
+            0x00C9, 0x00E6, 0x00C6, 0x00F4, 0x00F6, 0x00F2, 0x00FB, 0x00F9,
+            0x00FF, 0x00D6, 0x00DC, 0x00A2, 0x00A3, 0x00A5, 0x20A7, 0x0192,
+            0x00E1, 0x00ED, 0x00F3, 0x00FA, 0x00F1, 0x00D1, 0x00AA, 0x00BA,
+            0x00BF, 0x2310, 0x00AC, 0x00BD, 0x00BC, 0x00A1, 0x00AB, 0x00BB,
+            0x2591, 0x2592, 0x2593, 0x2502, 0x2524, 0x2561, 0x2562, 0x2556,
+            0x2555, 0x2563, 0x2551, 0x2557, 0x255D, 0x255C, 0x255B, 0x2510,
+            0x2514, 0x2534, 0x252C, 0x251C, 0x2500, 0x253C, 0x255E, 0x255F,
+            0x255A, 0x2554, 0x2569, 0x2566, 0x2560, 0x2550, 0x256C, 0x2567,
+            0x2568, 0x2564, 0x2565, 0x2559, 0x2558, 0x2552, 0x2553, 0x256B,
+            0x256A, 0x2518, 0x250C, 0x2588, 0x2584, 0x258C, 0x2590, 0x2580,
+            0x03B1, 0x00DF, 0x0393, 0x03C0, 0x03A3, 0x03C3, 0x00B5, 0x03C4,
+            0x03A6, 0x0398, 0x03A9, 0x03B4, 0x221E, 0x03C6, 0x03B5, 0x2229,
+            0x2261, 0x00B1, 0x2265, 0x2264, 0x2320, 0x2321, 0x00F7, 0x2248,
+            0x00B0, 0x2219, 0x00B7, 0x221A, 0x207F, 0x00B2, 0x25A0, 0x00A0
+        ];
+        return String.fromCharCode(cp437ToUnicode[code - 128]);
     }
 
     // INT 21h AH=06h: 直接控制台I/O
@@ -3158,7 +3212,8 @@ class CPU8086 {
         const stringAddress = (ds << 4) + dx;
         let char = this.readMemory8(stringAddress);
         while (char !== 0x24) { // 0x24 是 '$' 结束符
-            this.outputBuffer += String.fromCharCode(char);
+            // 将 DOS 扩展 ASCII 转换为 Unicode
+            this.outputBuffer += this.dosCharToUnicode(char);
             dx++;
             char = this.readMemory8((ds << 4) + dx);
         }

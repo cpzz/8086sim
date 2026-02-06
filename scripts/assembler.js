@@ -5,6 +5,7 @@ class Assembler {
         this.instructions = []; // 解析后的指令列表
         this.dataSegments = []; // 数据段信息
         this.codePaddings = []; // 存放代码段的对齐填充（如 EVEN 插入的 NOP）
+        this.codeDataSegments = []; // 存放代码段中的数据定义（如 ALL_CHARS_MSG DB ...）
         this.equDefinitions = []; // EQU常量定义
         this.currentSegment = 'code'; // 当前所在的段（data/code）
         this.model = 'small'; // 默认内存模型
@@ -92,6 +93,7 @@ class Assembler {
         this.symbols = {};
         this.instructions = [];
         this.dataSegments = [];
+        this.codeDataSegments = []; // 代码段中的数据定义
         this.equDefinitions = [];
         this.currentSegment = 'code'; // 默认在代码段
         
@@ -176,6 +178,16 @@ class Assembler {
                 const dataPart = line.substring(dbIndex + 4).trim();
                 const data = this.parseDB(dataPart);
 
+                // 如果在代码段，存储到 codeDataSegments
+                if (this.currentSegment === 'code') {
+                    this.codeDataSegments.push({
+                        offset: address,
+                        data: data,
+                        label: potentialLabel,
+                        originalLine: line.trim()
+                    });
+                }
+
                 address += data.length;
                 continue;
             }
@@ -195,6 +207,16 @@ class Assembler {
 
                 const dataPart = line.substring(dwIndex + 4).trim();
                 const data = this.parseDW(dataPart);
+
+                // 如果在代码段，存储到 codeDataSegments
+                if (this.currentSegment === 'code') {
+                    this.codeDataSegments.push({
+                        offset: address,
+                        data: data,
+                        label: potentialLabel,
+                        originalLine: line.trim()
+                    });
+                }
 
                 address += data.length;
                 continue;
@@ -216,6 +238,16 @@ class Assembler {
                 const dataPart = line.substring(ddIndex + 4).trim();
                 const data = this.parseDD(dataPart);
 
+                // 如果在代码段，存储到 codeDataSegments
+                if (this.currentSegment === 'code') {
+                    this.codeDataSegments.push({
+                        offset: address,
+                        data: data,
+                        label: potentialLabel,
+                        originalLine: line.trim()
+                    });
+                }
+
                 address += data.length;
                 continue;
             }
@@ -234,6 +266,16 @@ class Assembler {
                 const dataPart = line.substring(dqIndex + 4).trim();
                 const data = this.parseDQ(dataPart);
 
+                // 如果在代码段，存储到 codeDataSegments
+                if (this.currentSegment === 'code') {
+                    this.codeDataSegments.push({
+                        offset: address,
+                        data: data,
+                        label: potentialLabel,
+                        originalLine: line.trim()
+                    });
+                }
+
                 address += data.length;
                 continue;
             }
@@ -251,6 +293,16 @@ class Assembler {
 
                 const dataPart = line.substring(dtIndex + 4).trim();
                 const data = this.parseDT(dataPart);
+
+                // 如果在代码段，存储到 codeDataSegments
+                if (this.currentSegment === 'code') {
+                    this.codeDataSegments.push({
+                        offset: address,
+                        data: data,
+                        label: potentialLabel,
+                        originalLine: line.trim()
+                    });
+                }
 
                 address += data.length;
                 continue;
@@ -581,6 +633,28 @@ class Assembler {
             const equIndex = line.toLowerCase().indexOf(' equ ');
             if (equIndex !== -1 && equIndex > 0) {
                 continue; // EQU已在第一遍处理，不占用空间
+            }
+
+            // 在代码段中，跳过数据定义（它们已经在第一遍扫描时处理并写入数据段）
+            if (this.currentSegment === 'code') {
+                const lowerLineForData = lowerLine2;
+                // 检查是否是数据定义
+                const isDataDef = lowerLineForData.includes(' db ') ||
+                                  lowerLineForData.startsWith('db ') ||
+                                  lowerLineForData.includes(' dw ') ||
+                                  lowerLineForData.startsWith('dw ') ||
+                                  lowerLineForData.includes(' dd ') ||
+                                  lowerLineForData.startsWith('dd ') ||
+                                  lowerLineForData.includes(' dq ') ||
+                                  lowerLineForData.startsWith('dq ') ||
+                                  lowerLineForData.includes(' dt ') ||
+                                  lowerLineForData.startsWith('dt ');
+                if (isDataDef) {
+                    // 跳过数据定义，但更新地址
+                    const dataLen = this.estimateInstructionLength(line);
+                    address += dataLen;
+                    continue;
+                }
             }
 
             // 解析指令
@@ -2547,6 +2621,24 @@ class Assembler {
                         length: 1,
                         originalLine: originalLine.trim()
                     };
+                } else if (operands[0] === 'si') {
+                    return {
+                        address,
+                        opcode: 'PUSH',
+                        operands: ['SI'],
+                        machineCode: [0x56],
+                        length: 1,
+                        originalLine: originalLine.trim()
+                    };
+                } else if (operands[0] === 'di') {
+                    return {
+                        address,
+                        opcode: 'PUSH',
+                        operands: ['DI'],
+                        machineCode: [0x57],
+                        length: 1,
+                        originalLine: originalLine.trim()
+                    };
                 }
                 break;
             case 'pop':
@@ -2583,6 +2675,24 @@ class Assembler {
                         opcode: 'POP',
                         operands: ['DX'],
                         machineCode: [0x5a],
+                        length: 1,
+                        originalLine: originalLine.trim()
+                    };
+                } else if (operands[0] === 'si') {
+                    return {
+                        address,
+                        opcode: 'POP',
+                        operands: ['SI'],
+                        machineCode: [0x5e],
+                        length: 1,
+                        originalLine: originalLine.trim()
+                    };
+                } else if (operands[0] === 'di') {
+                    return {
+                        address,
+                        opcode: 'POP',
+                        operands: ['DI'],
+                        machineCode: [0x5f],
                         length: 1,
                         originalLine: originalLine.trim()
                     };
@@ -4697,11 +4807,43 @@ class Assembler {
                     if (regMap.hasOwnProperty(destReg)) {
                         const modRM = (regMap[destReg] << 3) | 0x06;
                         let offset = 0;
-                        if (this.symbols.hasOwnProperty(srcOperand)) {
-                            offset = this.symbols[srcOperand];
-                        } else if (this.isImmediate(srcOperand)) {
-                            offset = this.parseImmediate(srcOperand);
+                        
+                        // 处理带偏移的表达式，如 "LABEL+3" 或 "LABEL-5"
+                        const plusIndex = srcOperand.indexOf('+');
+                        const minusIndex = srcOperand.indexOf('-');
+                        
+                        if (plusIndex !== -1) {
+                            // 格式: LABEL+offset
+                            const label = srcOperand.substring(0, plusIndex);
+                            const offsetStr = srcOperand.substring(plusIndex + 1);
+                            // 尝试查找标签（不区分大小写）
+                            const labelLower = label.toLowerCase();
+                            const symbolKey = Object.keys(this.symbols).find(k => k.toLowerCase() === labelLower);
+                            if (symbolKey) {
+                                offset = this.symbols[symbolKey] + this.parseImmediate(offsetStr);
+                            }
+                        } else if (minusIndex !== -1 && minusIndex > 0) {
+                            // 格式: LABEL-offset (确保不是负数的立即数)
+                            const label = srcOperand.substring(0, minusIndex);
+                            const offsetStr = srcOperand.substring(minusIndex + 1);
+                            // 尝试查找标签（不区分大小写）
+                            const labelLower = label.toLowerCase();
+                            const symbolKey = Object.keys(this.symbols).find(k => k.toLowerCase() === labelLower);
+                            if (symbolKey) {
+                                offset = this.symbols[symbolKey] - this.parseImmediate(offsetStr);
+                            }
+                        } else {
+                            // 尝试查找标签（不区分大小写）
+                            const srcLower = srcOperand.toLowerCase();
+                            const symbolKey = Object.keys(this.symbols).find(k => k.toLowerCase() === srcLower);
+                            if (symbolKey) {
+                                offset = this.symbols[symbolKey];
+                            } else if (this.isImmediate(srcOperand)) {
+                                // 立即数
+                                offset = this.parseImmediate(srcOperand);
+                            }
                         }
+                        
                         return {
                             address,
                             opcode: 'LEA',
@@ -5029,6 +5171,14 @@ class Assembler {
             const codeAddress = codeSegmentBase + instruction.address;
             for (let i = 0; i < instruction.machineCode.length; i++) {
                 this.memory.write8(codeAddress + i, instruction.machineCode[i]);
+            }
+        }
+
+        // 写入代码段中的数据定义（如 ALL_CHARS_MSG DB ...）
+        for (const data of this.codeDataSegments) {
+            const dataAddress = codeSegmentBase + data.offset;
+            for (let i = 0; i < data.data.length; i++) {
+                this.memory.write8(dataAddress + i, data.data[i]);
             }
         }
     }
