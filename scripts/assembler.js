@@ -36,6 +36,14 @@ class Assembler {
         if (lowerLine.startsWith('assume ')) {
             return 'other';
         } else if (lowerLine.endsWith(' segment')) {
+            // 检查段名是否是 data 或 code
+            const parts = lowerLine.split(/\s+/).filter(Boolean);
+            const segmentName = parts[0].toLowerCase();
+            if (segmentName === 'data') {
+                return 'data';
+            } else if (segmentName === 'code') {
+                return 'code';
+            }
             return 'other';
         } else if (lowerLine.endsWith(' ends')) {
             return 'other';
@@ -79,6 +87,15 @@ class Assembler {
         } else if (lowerLine.includes(' endp ')) {
             // 解析 ENDP 伪指令
             // 这里可以处理过程结束的逻辑
+        } else if (lowerLine.endsWith(' segment')) {
+            // 解析传统段定义伪指令，已在 getDirectiveType 中处理段类型切换
+            // 这里可以处理段属性（如 PARA, WORD, BYTE 等）
+            const parts = lowerLine.split(/\s+/).filter(Boolean);
+            const segmentName = parts[0].toLowerCase();
+            // 段已通过 getDirectiveType 返回类型并在 parse 中处理
+        } else if (lowerLine.endsWith(' ends')) {
+            // 解析段结束伪指令
+            // 可以在这里处理段结束的逻辑
         }
     }
 
@@ -129,7 +146,24 @@ class Assembler {
             // 检查是否是冒号标签（如 "label:"）
             if (line.endsWith(':')) {
                 const label = line.slice(0, -1).trim();
-                this.symbols[label] = address;
+                
+                // 检查标签后面是否有实际指令（"label: instruction" 格式）
+                let hasInstruction = false;
+                const colonIndex = line.indexOf(':');
+                if (colonIndex < line.length - 1) {
+                    const instructionPart = line.substring(colonIndex + 1).trim();
+                    if (instructionPart !== '') {
+                        hasInstruction = true;
+                    }
+                }
+                
+                if (!hasInstruction) {
+                    // 纯标签行：暂时记录为"待确定"，使用特殊标记
+                    this.symbols[label] = { type: 'forward', lineIndex: i, initialAddr: address };
+                } else {
+                    // "label: instruction" 格式，标签指向当前指令
+                    this.symbols[label] = address;
+                }
                 continue;
             }
 
@@ -387,6 +421,101 @@ class Assembler {
 
             // 估算指令长度（简单实现，实际需要更复杂的计算）
             address += this.estimateInstructionLength(line);
+        }
+
+        // 第一遍结束后，重新计算纯标签行的地址
+        // 收集所有指令的地址映射
+        const lineAddresses = {};
+        address = 0;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (line === '' || line.startsWith(';')) {
+                continue;
+            }
+            
+            const directiveType = this.getDirectiveType(line);
+            if (directiveType) {
+                if (directiveType === 'data' || directiveType === 'code') {
+                    address = 0;
+                }
+                continue;
+            }
+            
+            if (line.endsWith(':')) {
+                // 检查是否是纯标签行
+                let hasInstruction = false;
+                const colonIndex = line.indexOf(':');
+                if (colonIndex < line.length - 1) {
+                    const instructionPart = line.substring(colonIndex + 1).trim();
+                    if (instructionPart !== '') {
+                        hasInstruction = true;
+                    }
+                }
+                
+                if (!hasInstruction) {
+                    // 纯标签行：记录下一条指令的地址（当前address就是下一条指令的地址）
+                    lineAddresses[i] = address;
+                }
+                continue;
+            }
+            
+            // 跳过 PROC 和 ENDP 伪指令
+            const parts = line.split(/\s+/).filter(Boolean);
+            const firstWord = parts.length > 0 ? parts[0].toLowerCase() : '';
+            const secondWord = parts.length > 1 ? parts[1].toLowerCase() : '';
+            if (firstWord === 'proc' || secondWord === 'proc' || 
+                firstWord === 'endp' || secondWord === 'endp') {
+                continue;
+            }
+            
+            // 跳过 EQU 常量定义
+            if (line.toLowerCase().includes(' equ ')) {
+                continue;
+            }
+            
+            // 跳过等号赋值
+            const equalMatch = line.match(/^(\w+)\s*=\s*(.+)$/);
+            if (equalMatch && !line.toLowerCase().includes(' equ ')) {
+                continue;
+            }
+            
+            // 记录这条指令的地址
+            lineAddresses[i] = address;
+            
+            // 累加指令长度
+            address += this.estimateInstructionLength(line);
+        }
+        
+        // 更新纯标签行的地址为下一条指令的地址
+        for (const label in this.symbols) {
+            if (typeof this.symbols[label] === 'object' && this.symbols[label].type === 'forward') {
+                const lineIndex = this.symbols[label].lineIndex;
+                // 查找下一条指令的地址（跳过标签行本身）
+                let foundAddr = undefined;
+                for (let i = lineIndex + 1; i < lines.length; i++) {
+                    const nextLine = lines[i].trim();
+                    // 跳过空行和注释
+                    if (nextLine === '' || nextLine.startsWith(';')) {
+                        continue;
+                    }
+                    // 跳过纯标签行
+                    if (nextLine.endsWith(':')) {
+                        const colonIndex = nextLine.indexOf(':');
+                        const instructionPart = nextLine.substring(colonIndex + 1).trim();
+                        if (instructionPart === '') {
+                            continue; // 纯标签行，继续查找
+                        }
+                    }
+                    // 找到真正的指令行
+                    if (lineAddresses[i] !== undefined) {
+                        foundAddr = lineAddresses[i];
+                        break;
+                    }
+                }
+                if (foundAddr !== undefined) {
+                    this.symbols[label] = foundAddr;
+                }
+            }
         }
 
         // 第二遍：解析指令并生成机器码
@@ -777,6 +906,10 @@ class Assembler {
                 if (operands[0] === 'ax' && operands[1] === 'ax') return 2;
                 if (operands[0] === 'ax') return 3;
                 if ((operands[0] === 'bx' || operands[0] === 'cx' || operands[0] === 'dx') && this.isImmediate(operands[1])) return 4;
+                // ADD r8, imm8 (如 ADD DL, 07H) - 3字节
+                if (['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'].includes(operands[0]) && this.isImmediate(operands[1])) {
+                    return 3;
+                }
                 return 2;
             case 'adc':
             case 'sbb':
@@ -847,6 +980,8 @@ class Assembler {
             case 'test':
                 if (operands[0] === 'al') return 2;
                 if (operands[0] === 'ax') return 3;
+                // 对于8位寄存器的立即数比较（非AL），返回3字节长度
+                if (['cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'].includes(operands[0]) && this.isImmediate(operands[1])) return 3;
                 // 对于si, di, sp, bp寄存器的立即数比较，返回4字节长度
                 const specialRegisters = ['si', 'di', 'sp', 'bp'];
                 if (specialRegisters.includes(operands[0].toLowerCase()) && this.isImmediate(operands[1])) return 4;
@@ -854,7 +989,7 @@ class Assembler {
                 if (['bx', 'cx', 'dx'].includes(operands[0].toLowerCase()) && this.isImmediate(operands[1])) return 4;
                 return 2;
             case 'jmp':
-                return 2; // 默认返回 short 的长度，实际会根据偏移量选择
+                return 3; // 返回 near 的长度，因为更常用（避免short和near长度不一致导致标签地址错误）
             case 'jz':
             case 'je':
             case 'jnz':
@@ -1234,17 +1369,38 @@ class Assembler {
                     originalLine: originalLine.trim()
                 };
             case 'add':
-                if (operands[0] === 'al' && this.isImmediate(operands[1])) {
+                // 处理 ADD r8, imm8 指令
+                const addReg8Map = {
+                    'al': 0, 'cl': 1, 'dl': 2, 'bl': 3,
+                    'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7
+                };
+                if (addReg8Map.hasOwnProperty(operands[0]) && this.isImmediate(operands[1])) {
                     const imm8 = this.parseImmediate(operands[1]);
-                    return {
-                        address,
-                        opcode: 'ADD',
-                        operands: ['AL', operands[1]],
-                        machineCode: [0x04, imm8],
-                        length: 2,
-                        originalLine: originalLine.trim()
-                    };
+                    if (operands[0] === 'al') {
+                        // ADD AL, imm8 - 操作码04
+                        return {
+                            address,
+                            opcode: 'ADD',
+                            operands: ['AL', operands[1]],
+                            machineCode: [0x04, imm8],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    } else {
+                        // ADD r/m8, imm8 - 操作码80, mod=11, reg=0(ADD), rm=寄存器编码
+                        const rm = addReg8Map[operands[0]];
+                        const modRM = (3 << 6) | (0 << 3) | rm;
+                        return {
+                            address,
+                            opcode: 'ADD',
+                            operands: [operands[0].toUpperCase(), operands[1]],
+                            machineCode: [0x80, modRM, imm8],
+                            length: 3,
+                            originalLine: originalLine.trim()
+                        };
+                    }
                 }
+                // 处理 ADD r16, imm16 指令
                 if (operands[0] === 'ax' && this.isImmediate(operands[1])) {
                     const imm16 = this.parseImmediate(operands[1]);
                     return {
@@ -1256,34 +1412,21 @@ class Assembler {
                         originalLine: originalLine.trim()
                     };
                 }
-                if (operands[0] === 'bx' && operands[1] === 'cx') {
-                    return {
-                        address,
-                        opcode: 'ADD',
-                        operands: ['BX', 'CX'],
-                        machineCode: [0x01, 0xcb],
-                        length: 2,
-                        originalLine: originalLine.trim()
-                    };
-                }
-                if (operands[0] === 'bx' && this.isImmediate(operands[1])) {
+                // 支持更多16位寄存器的立即数ADD指令
+                const addRegMap16 = {
+                    'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
+                    'sp': 4, 'bp': 5, 'si': 6, 'di': 7
+                };
+                if (addRegMap16.hasOwnProperty(operands[0]) && this.isImmediate(operands[1])) {
                     const imm16 = this.parseImmediate(operands[1]);
+                    // ADD r/m16, imm16 - 操作码81, mod=11, reg=0(ADD), rm=寄存器编码
+                    const rm = addRegMap16[operands[0]];
+                    const modRM = (3 << 6) | (0 << 3) | rm;
                     return {
                         address,
                         opcode: 'ADD',
-                        operands: ['BX', operands[1]],
-                        machineCode: [0x81, 0xc3, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 4,
-                        originalLine: originalLine.trim()
-                    };
-                }
-                if (operands[0] === 'cx' && this.isImmediate(operands[1])) {
-                    const imm16 = this.parseImmediate(operands[1]);
-                    return {
-                        address,
-                        opcode: 'ADD',
-                        operands: ['CX', operands[1]],
-                        machineCode: [0x81, 0xc1, imm16 & 0xff, (imm16 >> 8) & 0xff],
+                        operands: [operands[0].toUpperCase(), operands[1]],
+                        machineCode: [0x81, modRM, imm16 & 0xff, (imm16 >> 8) & 0xff],
                         length: 4,
                         originalLine: originalLine.trim()
                     };
@@ -1307,14 +1450,18 @@ class Assembler {
                         originalLine: originalLine.trim()
                     };
                 }
-                if (operands[0] === 'dx' && this.isImmediate(operands[1])) {
-                    const imm16 = this.parseImmediate(operands[1]);
+                // 支持8位寄存器到寄存器的ADD指令
+                if (reg8Map.hasOwnProperty(operands[0]) && reg8Map.hasOwnProperty(operands[1])) {
+                    const dstReg = reg8Map[operands[0]];
+                    const srcReg = reg8Map[operands[1]];
+                    // ADD r/m8, r8 - 操作码00, mod=11, reg=源寄存器, rm=目标寄存器
+                    const modRM = (3 << 6) | (srcReg << 3) | dstReg;
                     return {
                         address,
                         opcode: 'ADD',
-                        operands: ['DX', operands[1]],
-                        machineCode: [0x81, 0xc2, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 4,
+                        operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                        machineCode: [0x00, modRM],
+                        length: 2,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -1452,18 +1599,39 @@ class Assembler {
                 }
                 break;
             case 'and':
-                if (operands[0] === 'al') {
+                // 处理 AND r8, imm8 指令
+                const andReg8Map = {
+                    'al': 0, 'cl': 1, 'dl': 2, 'bl': 3,
+                    'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7
+                };
+                if (andReg8Map.hasOwnProperty(operands[0]) && this.isImmediate(operands[1])) {
                     const imm8 = this.parseImmediate(operands[1]);
-                    return {
-                        address,
-                        opcode: 'AND',
-                        operands: ['AL', operands[1]],
-                        machineCode: [0x24, imm8],
-                        length: 2,
-                        originalLine: originalLine.trim()
-                    };
+                    if (operands[0] === 'al') {
+                        // AND AL, imm8 - 操作码24
+                        return {
+                            address,
+                            opcode: 'AND',
+                            operands: ['AL', operands[1]],
+                            machineCode: [0x24, imm8],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    } else {
+                        // AND r/m8, imm8 - 操作码80, mod=11, reg=4(AND), rm=寄存器编码
+                        const rm = andReg8Map[operands[0]];
+                        const modRM = (3 << 6) | (4 << 3) | rm;
+                        return {
+                            address,
+                            opcode: 'AND',
+                            operands: [operands[0].toUpperCase(), operands[1]],
+                            machineCode: [0x80, modRM, imm8],
+                            length: 3,
+                            originalLine: originalLine.trim()
+                        };
+                    }
                 }
-                if (operands[0] === 'ax') {
+                // 处理 AND r16, imm16 指令
+                if (operands[0] === 'ax' && this.isImmediate(operands[1])) {
                     const imm16 = this.parseImmediate(operands[1]);
                     return {
                         address,
@@ -1471,6 +1639,25 @@ class Assembler {
                         operands: ['AX', operands[1]],
                         machineCode: [0x25, imm16 & 0xff, (imm16 >> 8) & 0xff],
                         length: 3,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                // 支持更多16位寄存器的立即数AND指令
+                const andRegMap16 = {
+                    'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
+                    'sp': 4, 'bp': 5, 'si': 6, 'di': 7
+                };
+                if (andRegMap16.hasOwnProperty(operands[0]) && this.isImmediate(operands[1])) {
+                    const imm16 = this.parseImmediate(operands[1]);
+                    // AND r/m16, imm16 - 操作码81, mod=11, reg=4(AND), rm=寄存器编码
+                    const rm = andRegMap16[operands[0]];
+                    const modRM = (3 << 6) | (4 << 3) | rm;
+                    return {
+                        address,
+                        opcode: 'AND',
+                        operands: [operands[0].toUpperCase(), operands[1]],
+                        machineCode: [0x81, modRM, imm16 & 0xff, (imm16 >> 8) & 0xff],
+                        length: 4,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -1489,6 +1676,21 @@ class Assembler {
                         opcode: 'AND',
                         operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
                         machineCode: [0x21, modRM],
+                        length: 2,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                // 支持8位寄存器到寄存器的AND指令
+                if (andReg8Map.hasOwnProperty(operands[0]) && andReg8Map.hasOwnProperty(operands[1])) {
+                    const dstReg = andReg8Map[operands[0]];
+                    const srcReg = andReg8Map[operands[1]];
+                    // AND r/m8, r8 - 操作码20, mod=11, reg=源寄存器, rm=目标寄存器
+                    const modRM = (3 << 6) | (srcReg << 3) | dstReg;
+                    return {
+                        address,
+                        opcode: 'AND',
+                        operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                        machineCode: [0x20, modRM],
                         length: 2,
                         originalLine: originalLine.trim()
                     };
@@ -2553,35 +2755,69 @@ class Assembler {
                 }
                 break;
             case 'shr':
-                if (operands[0] === 'al' && operands[1] === '1') {
-                    return {
-                        address,
-                        opcode: 'SHR',
-                        operands: ['AL', '1'],
-                        machineCode: [0xd0, 0xe8],
-                        length: 2,
-                        originalLine: originalLine.trim()
+                // 处理 SHR r/m, 1 指令
+                if (operands[1] === '1') {
+                    const regMap = {
+                        'al': { opcode: 0xd0, modrm: 0xe0 },
+                        'ax': { opcode: 0xd1, modrm: 0xe0 },
+                        'bl': { opcode: 0xd0, modrm: 0xe3 },
+                        'bx': { opcode: 0xd1, modrm: 0xe3 },
+                        'cl': { opcode: 0xd0, modrm: 0xe1 },
+                        'cx': { opcode: 0xd1, modrm: 0xe1 },
+                        'dl': { opcode: 0xd0, modrm: 0xe2 },
+                        'dx': { opcode: 0xd1, modrm: 0xe2 },
+                        'si': { opcode: 0xd1, modrm: 0xe6 },
+                        'di': { opcode: 0xd1, modrm: 0xe7 }
                     };
+                    
+                    if (regMap.hasOwnProperty(operands[0])) {
+                        const info = regMap[operands[0]];
+                        return {
+                            address,
+                            opcode: 'SHR',
+                            operands: [operands[0].toUpperCase(), '1'],
+                            machineCode: [info.opcode, info.modrm],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    }
                 }
-                if (operands[0] === 'ax' && operands[1] === '1') {
-                    return {
-                        address,
-                        opcode: 'SHR',
-                        operands: ['AX', '1'],
-                        machineCode: [0xd1, 0xe8],
-                        length: 2,
-                        originalLine: originalLine.trim()
+                // 处理 SHR r/m, CL 指令
+                if (operands[1] === 'cl') {
+                    const reg8Map = {
+                        'al': 0, 'cl': 1, 'dl': 2, 'bl': 3,
+                        'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7
                     };
-                }
-                if (operands[0] === 'bx' && operands[1] === '1') {
-                    return {
-                        address,
-                        opcode: 'SHR',
-                        operands: ['BX', '1'],
-                        machineCode: [0xd1, 0xeb],
-                        length: 2,
-                        originalLine: originalLine.trim()
+                    const reg16Map = {
+                        'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
+                        'sp': 4, 'bp': 5, 'si': 6, 'di': 7
                     };
+                    
+                    if (reg8Map.hasOwnProperty(operands[0])) {
+                        // SHR r/m8, CL - 操作码 D2, mod=11, reg=5 (SHR), rm=寄存器编码
+                        const rm = reg8Map[operands[0]];
+                        const modRM = (3 << 6) | (5 << 3) | rm;
+                        return {
+                            address,
+                            opcode: 'SHR',
+                            operands: [operands[0].toUpperCase(), 'CL'],
+                            machineCode: [0xd2, modRM],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    } else if (reg16Map.hasOwnProperty(operands[0])) {
+                        // SHR r/m16, CL - 操作码 D3, mod=11, reg=5 (SHR), rm=寄存器编码
+                        const rm = reg16Map[operands[0]];
+                        const modRM = (3 << 6) | (5 << 3) | rm;
+                        return {
+                            address,
+                            opcode: 'SHR',
+                            operands: [operands[0].toUpperCase(), 'CL'],
+                            machineCode: [0xd3, modRM],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    }
                 }
                 break;
             case 'push':
@@ -2699,18 +2935,39 @@ class Assembler {
                 }
                 break;
             case 'cmp':
-                if (operands[0] === 'al') {
+                // 处理 CMP r8, imm8 指令
+                const cmpReg8Map = {
+                    'al': 0, 'cl': 1, 'dl': 2, 'bl': 3,
+                    'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7
+                };
+                if (cmpReg8Map.hasOwnProperty(operands[0]) && this.isImmediate(operands[1])) {
                     const imm8 = this.parseImmediate(operands[1]);
-                    return {
-                        address,
-                        opcode: 'CMP',
-                        operands: ['AL', operands[1]],
-                        machineCode: [0x3c, imm8],
-                        length: 2,
-                        originalLine: originalLine.trim()
-                    };
+                    if (operands[0] === 'al') {
+                        // CMP AL, imm8 - 操作码3c
+                        return {
+                            address,
+                            opcode: 'CMP',
+                            operands: ['AL', operands[1]],
+                            machineCode: [0x3c, imm8],
+                            length: 2,
+                            originalLine: originalLine.trim()
+                        };
+                    } else {
+                        // CMP r/m8, imm8 - 操作码80, mod=11, reg=7(CMP), rm=寄存器编码
+                        const rm = cmpReg8Map[operands[0]];
+                        const modRM = (3 << 6) | (7 << 3) | rm;
+                        return {
+                            address,
+                            opcode: 'CMP',
+                            operands: [operands[0].toUpperCase(), operands[1]],
+                            machineCode: [0x80, modRM, imm8],
+                            length: 3,
+                            originalLine: originalLine.trim()
+                        };
+                    }
                 }
-                if (operands[0] === 'ax') {
+                // 处理 CMP r16, imm16 指令
+                if (operands[0] === 'ax' && this.isImmediate(operands[1])) {
                     const imm16 = this.parseImmediate(operands[1]);
                     return {
                         address,
@@ -2721,34 +2978,12 @@ class Assembler {
                         originalLine: originalLine.trim()
                     };
                 }
-                if (operands[0] === 'cx') {
-                    const imm16 = this.parseImmediate(operands[1]);
-                    return {
-                        address,
-                        opcode: 'CMP',
-                        operands: ['CX', operands[1]],
-                        machineCode: [0x81, 0xf9, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 4,
-                        originalLine: originalLine.trim()
-                    };
-                }
-                if (operands[0] === 'bx') {
-                    const imm16 = this.parseImmediate(operands[1]);
-                    return {
-                        address,
-                        opcode: 'CMP',
-                        operands: ['BX', operands[1]],
-                        machineCode: [0x81, 0xfb, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 4,
-                        originalLine: originalLine.trim()
-                    };
-                }
-                // 支持更多寄存器的立即数比较指令
+                // 支持更多16位寄存器的立即数CMP指令
                 const cmpRegMap = {
                     'ax': 0xf8, 'cx': 0xf9, 'dx': 0xfa, 'bx': 0xfb,
                     'sp': 0xfc, 'bp': 0xfd, 'si': 0xfe, 'di': 0xff
                 };
-                if (cmpRegMap.hasOwnProperty(operands[0])) {
+                if (cmpRegMap.hasOwnProperty(operands[0]) && this.isImmediate(operands[1])) {
                     const imm16 = this.parseImmediate(operands[1]);
                     return {
                         address,
@@ -2825,11 +3060,13 @@ class Assembler {
             case 'jmp':
                 if (operands.length === 1) {
                     const targetAddress = this.parseImmediate(operands[0]);
-                    const offset = targetAddress - (address + 2);
+                    // 先按near jump计算偏移量（3字节）
+                    const offsetNear = targetAddress - (address + 3);
                     // 判断使用 short 还是 near ptr
-                    if (offset >= -128 && offset <= 127) {
-                        // JMP short (EB)
-                        const offset8 = offset & 0xff;
+                    if (offsetNear >= -128 && offsetNear <= 127) {
+                        // JMP short (EB) - 2字节
+                        const offsetShort = targetAddress - (address + 2);
+                        const offset8 = offsetShort & 0xff;
                         return {
                             address,
                             opcode: 'JMP',
@@ -2839,8 +3076,8 @@ class Assembler {
                             originalLine: 'JMP'
                         };
                     } else {
-                        // JMP near ptr (E9)
-                        const offset16 = offset & 0xffff;
+                        // JMP near ptr (E9) - 3字节
+                        const offset16 = offsetNear & 0xffff;
                         return {
                             address,
                             opcode: 'JMP',
@@ -4069,23 +4306,6 @@ class Assembler {
                     length: 1,
                     originalLine: originalLine.trim()
                 };
-            case 'jc':
-            case 'jb':
-            case 'jnae':
-                if (operands.length === 1) {
-                    const targetAddress = this.parseImmediate(operands[0]);
-                    const offset = targetAddress - (address + 2);
-                    const offset8 = offset & 0xff;
-                    return {
-                        address,
-                        opcode: opcode === 'jc' ? 'JC' : (opcode === 'jb' ? 'JB' : 'JNAE'),
-                        operands: [operands[0]],
-                        machineCode: [0x72, offset8],
-                        length: 2,
-                        originalLine: originalLine.trim()
-                    };
-                }
-                break;
             case 'jnc':
             case 'jnb':
             case 'jae':

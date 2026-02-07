@@ -217,6 +217,132 @@ class CPU8086 {
         // 跟踪内存写入操作
         this.memoryOperations.set(address, { type: 'write', value });
     }
+
+    // 计算有效地址 (Effective Address) 用于寻址模式
+    calculateEffectiveAddress(mod, rm, currentAddress) {
+        let offset = 0;
+        let address = 0;
+        
+        switch (mod) {
+            case 0:
+                // 无位移
+                if (rm === 6) {
+                    // [disp16] - 直接寻址
+                    address = this.readMemory16(currentAddress + 2);
+                    return { address, displacementSize: 2 };
+                }
+                break;
+            case 1:
+                // 8位位移
+                offset = this.readMemory8(currentAddress + 2);
+                // 符号扩展
+                if (offset > 127) {
+                    offset -= 256;
+                }
+                return { offset, displacementSize: 1 };
+            case 2:
+                // 16位位移
+                offset = this.readMemory16(currentAddress + 2);
+                return { offset, displacementSize: 2 };
+            case 3:
+                // 寄存器模式，不需要计算地址
+                return { registerMode: true };
+        }
+        
+        // 根据 rm 计算基地址
+        switch (rm) {
+            case 0:
+                address = this.getRegister('bx') + this.getRegister('si');
+                break;
+            case 1:
+                address = this.getRegister('bx') + this.getRegister('di');
+                break;
+            case 2:
+                address = this.getRegister('bp') + this.getRegister('si');
+                break;
+            case 3:
+                address = this.getRegister('bp') + this.getRegister('di');
+                break;
+            case 4:
+                address = this.getRegister('si');
+                break;
+            case 5:
+                address = this.getRegister('di');
+                break;
+            case 6:
+                address = this.getRegister('bp');
+                break;
+            case 7:
+                address = this.getRegister('bx');
+                break;
+        }
+        
+        // 添加位移
+        address += offset;
+        
+        return { address, displacementSize: mod === 0 ? 0 : (mod === 1 ? 1 : 2) };
+    }
+
+    // 从 r/m 操作数读取8位值
+    readRM8(mod, rm, currentAddress) {
+        if (mod === 3) {
+            // 寄存器模式
+            const rmToName = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+            const isHighByte = [false, false, false, false, true, true, true, true];
+            const regName = rmToName[rm];
+            const value = this.getRegister(regName);
+            return isHighByte[rm] ? (value >> 8) & 0xff : value & 0xff;
+        } else {
+            // 内存模式
+            const ea = this.calculateEffectiveAddress(mod, rm, currentAddress);
+            return this.readMemory8(ea.address);
+        }
+    }
+
+    // 从 r/m 操作数读取16位值
+    readRM16(mod, rm, currentAddress) {
+        if (mod === 3) {
+            // 寄存器模式
+            const rmToName = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+            return this.getRegister(rmToName[rm]);
+        } else {
+            // 内存模式
+            const ea = this.calculateEffectiveAddress(mod, rm, currentAddress);
+            return this.readMemory16(ea.address);
+        }
+    }
+
+    // 向 r/m 操作数写入8位值
+    writeRM8(mod, rm, currentAddress, value) {
+        if (mod === 3) {
+            // 寄存器模式
+            const rmToName = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+            const isHighByte = [false, false, false, false, true, true, true, true];
+            const regName = rmToName[rm];
+            const oldValue = this.getRegister(regName);
+            const newValue = isHighByte[rm] ? 
+                (oldValue & 0x00ff) | ((value & 0xff) << 8) : 
+                (oldValue & 0xff00) | (value & 0xff);
+            this.setRegister(regName, newValue);
+        } else {
+            // 内存模式
+            const ea = this.calculateEffectiveAddress(mod, rm, currentAddress);
+            this.writeMemory8(ea.address, value);
+        }
+    }
+
+    // 向 r/m 操作数写入16位值
+    writeRM16(mod, rm, currentAddress, value) {
+        if (mod === 3) {
+            // 寄存器模式
+            const rmToName = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+            this.setRegister(rmToName[rm], value & 0xffff);
+        } else {
+            // 内存模式
+            const ea = this.calculateEffectiveAddress(mod, rm, currentAddress);
+            this.writeMemory16(ea.address, value);
+        }
+    }
     
     // 清除内存操作跟踪
     clearMemoryOperations() {
@@ -236,13 +362,6 @@ class CPU8086 {
     // 获取寄存器操作
     getRegisterOperations() {
         return this.registerOperations;
-    }
-    
-    // 计算有效地址
-    calculateEffectiveAddress(segmentReg, offsetReg) {
-        const segment = this.getSegmentRegister(segmentReg);
-        const offset = this.getRegister(offsetReg);
-        return this.getMemoryAddress(segment, offset);
     }
     
     // 添加断点
@@ -334,7 +453,7 @@ class CPU8086 {
             case 0x03: // ADD Gv, Ev
                 instructionLength = 2;
                 break;
-            case 0x04: // ADD AL, Ib
+            case 0x04: { // ADD AL, Ib
                 const imm8 = this.readMemory8(currentAddress + 1);
                 const al = this.getRegister('ax') & 0xff;
                 const result = al + imm8;
@@ -343,7 +462,8 @@ class CPU8086 {
                 this.updateFlags8(result, al, imm8);
                 instructionLength = 2;
                 break;
-            case 0x05: // ADD AX, Iv
+            }
+            case 0x05: { // ADD AX, Iv
                 const imm16 = this.readMemory16(currentAddress + 1);
                 const ax = this.getRegister('ax');
                 const result16 = ax + imm16;
@@ -352,7 +472,8 @@ class CPU8086 {
                 this.updateFlags16(result16, ax, imm16);
                 instructionLength = 3;
                 break;
-            case 0x13: // ADC Gv, Ev (ADC r16, r/m16)
+            }
+            case 0x13: { // ADC Gv, Ev (ADC r16, r/m16)
                 const modrm13 = this.readMemory8(currentAddress + 1);
                 const reg13 = (modrm13 >> 3) & 0x7;
                 const mod13 = (modrm13 >> 6) & 0x3;
@@ -360,24 +481,32 @@ class CPU8086 {
 
                 // 寄存器映射
                 const regToName13 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-                const rmToName13 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-
+                
+                // 读取源操作数值（支持所有寻址模式）
+                const srcValue13 = this.readRM16(mod13, rm13, currentAddress);
+                
+                // 读取目标寄存器值
+                const dstValue13 = this.getRegister(regToName13[reg13]);
+                
+                // 执行 ADC 操作
+                const result13 = dstValue13 + srcValue13 + this.flags.cf;
+                
+                // 写回结果
+                this.setRegister(regToName13[reg13], result13 & 0xffff);
+                
+                // 更新标志位
+                this.updateFlags16(result13, dstValue13, srcValue13 + this.flags.cf, 'add');
+                
+                // 计算指令长度
                 if (mod13 === 3) {
-                    // 寄存器到寄存器 ADC
-                    const srcValue13 = this.getRegister(rmToName13[rm13]);
-                    const dstValue13 = this.getRegister(regToName13[reg13]);
-                    const result13 = dstValue13 + srcValue13 + this.flags.cf;
-                    this.setRegister(regToName13[reg13], result13 & 0xffff);
-                    // 设置标志位
-                    this.updateFlags16(result13, dstValue13, srcValue13 + this.flags.cf, 'add');
                     instructionLength = 2;
                 } else {
-                    console.error(`执行错误: 不支持的寻址模式 mod=${mod13}`);
-                    this.running = false;
-                    return false;
+                    const ea = this.calculateEffectiveAddress(mod13, rm13, currentAddress);
+                    instructionLength = 2 + ea.displacementSize;
                 }
                 break;
-            case 0x14: // ADC AL, Ib
+            }
+            case 0x14: { // ADC AL, Ib
                 const imm8adc = this.readMemory8(currentAddress + 1);
                 const aladc = this.getRegister('ax') & 0xff;
                 const result8adc = aladc + imm8adc + this.flags.cf;
@@ -386,7 +515,8 @@ class CPU8086 {
                 this.updateFlags8(result8adc, aladc, imm8adc + this.flags.cf, 'add');
                 instructionLength = 2;
                 break;
-            case 0x15: // ADC AX, Iv
+            }
+            case 0x15: { // ADC AX, Iv
                 const imm16adc = this.readMemory16(currentAddress + 1);
                 const axadc = this.getRegister('ax');
                 const result16adc = axadc + imm16adc + this.flags.cf;
@@ -395,7 +525,8 @@ class CPU8086 {
                 this.updateFlags16(result16adc, axadc, imm16adc + this.flags.cf, 'add');
                 instructionLength = 3;
                 break;
-            case 0x19: // SBB r/m16, r16
+            }
+            case 0x19: { // SBB r/m16, r16
                 const modrm19 = this.readMemory8(currentAddress + 1);
                 const reg19 = (modrm19 >> 3) & 0x7;
                 const mod19 = (modrm19 >> 6) & 0x3;
@@ -403,24 +534,33 @@ class CPU8086 {
 
                 // 寄存器映射
                 const regToName19 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-                const rmToName19 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-
+                
+                // 读取源寄存器值
+                const srcValue19 = this.getRegister(regToName19[reg19]);
+                
+                // 读取目标操作数值（支持所有寻址模式）
+                const dstValue19 = this.readRM16(mod19, rm19, currentAddress);
+                
+                // 执行 SBB 操作
+                const carry19 = this.flags.cf;
+                const result19 = dstValue19 - srcValue19 - carry19;
+                
+                // 写回结果（支持所有寻址模式）
+                this.writeRM16(mod19, rm19, currentAddress, result19);
+                
+                // 更新标志位
+                this.updateFlags16(result19, dstValue19, srcValue19 + carry19, 'sub');
+                
+                // 计算指令长度
                 if (mod19 === 3) {
-                    // 寄存器到寄存器 SBB
-                    const srcValue19 = this.getRegister(regToName19[reg19]);
-                    const dstValue19 = this.getRegister(rmToName19[rm19]);
-                    const carry19 = this.flags.cf;
-                    const result19 = dstValue19 - srcValue19 - carry19;
-                    this.setRegister(rmToName19[rm19], result19 & 0xffff);
-                    this.updateFlags16(result19, dstValue19, srcValue19 + carry19, 'sub');
                     instructionLength = 2;
                 } else {
-                    console.error(`执行错误: 不支持的寻址模式 mod=${mod19}`);
-                    this.running = false;
-                    return false;
+                    const ea = this.calculateEffectiveAddress(mod19, rm19, currentAddress);
+                    instructionLength = 2 + ea.displacementSize;
                 }
                 break;
-            case 0x1b: // SBB r16, r/m16
+            }
+            case 0x1b: { // SBB r16, r/m16
                 const modrm1b = this.readMemory8(currentAddress + 1);
                 const reg1b = (modrm1b >> 3) & 0x7;
                 const mod1b = (modrm1b >> 6) & 0x3;
@@ -428,23 +568,32 @@ class CPU8086 {
 
                 // 寄存器映射
                 const regToName1b = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-                const rmToName1b = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-
+                
+                // 读取源操作数值（支持所有寻址模式）
+                const srcValue1b = this.readRM16(mod1b, rm1b, currentAddress);
+                
+                // 读取目标寄存器值
+                const dstValue1b = this.getRegister(regToName1b[reg1b]);
+                
+                // 执行 SBB 操作
+                const carry1b = this.flags.cf;
+                const result1b = dstValue1b - srcValue1b - carry1b;
+                
+                // 写回结果
+                this.setRegister(regToName1b[reg1b], result1b & 0xffff);
+                
+                // 更新标志位
+                this.updateFlags16(result1b, dstValue1b, srcValue1b + carry1b, 'sub');
+                
+                // 计算指令长度
                 if (mod1b === 3) {
-                    // 寄存器到寄存器 SBB
-                    const srcValue1b = this.getRegister(rmToName1b[rm1b]);
-                    const dstValue1b = this.getRegister(regToName1b[reg1b]);
-                    const carry1b = this.flags.cf;
-                    const result1b = dstValue1b - srcValue1b - carry1b;
-                    this.setRegister(regToName1b[reg1b], result1b & 0xffff);
-                    this.updateFlags16(result1b, dstValue1b, srcValue1b + carry1b, 'sub');
                     instructionLength = 2;
                 } else {
-                    console.error(`执行错误: 不支持的寻址模式 mod=${mod1b}`);
-                    this.running = false;
-                    return false;
+                    const ea = this.calculateEffectiveAddress(mod1b, rm1b, currentAddress);
+                    instructionLength = 2 + ea.displacementSize;
                 }
                 break;
+            }
             case 0x1c: // SBB AL, Ib
                 const imm8sbb = this.readMemory8(currentAddress + 1);
                 const alsbb = this.getRegister('ax') & 0xff;
@@ -503,20 +652,28 @@ class CPU8086 {
 
                 // 寄存器映射
                 const regToName29 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-                const rmToName29 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-
+                
+                // 读取源寄存器值
+                const srcValue29 = this.getRegister(regToName29[reg29]);
+                
+                // 读取目标操作数值（支持所有寻址模式）
+                const dstValue29 = this.readRM16(mod29, rm29, currentAddress);
+                
+                // 执行 SUB 操作
+                const result29 = dstValue29 - srcValue29;
+                
+                // 写回结果（支持所有寻址模式）
+                this.writeRM16(mod29, rm29, currentAddress, result29);
+                
+                // 更新标志位
+                this.updateFlags16(result29, dstValue29, srcValue29, 'sub');
+                
+                // 计算指令长度
                 if (mod29 === 3) {
-                    // 寄存器到寄存器 SUB
-                    const srcValue29 = this.getRegister(regToName29[reg29]);
-                    const dstValue29 = this.getRegister(rmToName29[rm29]);
-                    const result29 = dstValue29 - srcValue29;
-                    this.setRegister(rmToName29[rm29], result29 & 0xffff);
-                    this.updateFlags16(result29, dstValue29, srcValue29, 'sub');
                     instructionLength = 2;
                 } else {
-                    console.error(`执行错误: 不支持的寻址模式 mod=${mod29}`);
-                    this.running = false;
-                    return false;
+                    const ea = this.calculateEffectiveAddress(mod29, rm29, currentAddress);
+                    instructionLength = 2 + ea.displacementSize;
                 }
                 break;
             case 0x2b: // SUB r16, r/m16
@@ -527,20 +684,28 @@ class CPU8086 {
 
                 // 寄存器映射
                 const regToName2b = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-                const rmToName2b = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-
+                
+                // 读取源操作数值（支持所有寻址模式）
+                const srcValue2b = this.readRM16(mod2b, rm2b, currentAddress);
+                
+                // 读取目标寄存器值
+                const dstValue2b = this.getRegister(regToName2b[reg2b]);
+                
+                // 执行 SUB 操作
+                const result2b = dstValue2b - srcValue2b;
+                
+                // 写回结果
+                this.setRegister(regToName2b[reg2b], result2b & 0xffff);
+                
+                // 更新标志位
+                this.updateFlags16(result2b, dstValue2b, srcValue2b, 'sub');
+                
+                // 计算指令长度
                 if (mod2b === 3) {
-                    // 寄存器到寄存器 SUB
-                    const srcValue2b = this.getRegister(rmToName2b[rm2b]);
-                    const dstValue2b = this.getRegister(regToName2b[reg2b]);
-                    const result2b = dstValue2b - srcValue2b;
-                    this.setRegister(regToName2b[reg2b], result2b & 0xffff);
-                    this.updateFlags16(result2b, dstValue2b, srcValue2b, 'sub');
                     instructionLength = 2;
                 } else {
-                    console.error(`执行错误: 不支持的寻址模式 mod=${mod2b}`);
-                    this.running = false;
-                    return false;
+                    const ea = this.calculateEffectiveAddress(mod2b, rm2b, currentAddress);
+                    instructionLength = 2 + ea.displacementSize;
                 }
                 break;
             case 0x24: // AND AL, Ib
@@ -605,20 +770,28 @@ class CPU8086 {
 
                 // 寄存器映射
                 const regToName31 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-                const rmToName31 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-
+                
+                // 读取源寄存器值
+                const srcValue31 = this.getRegister(regToName31[reg31]);
+                
+                // 读取目标操作数值（支持所有寻址模式）
+                const dstValue31 = this.readRM16(mod31, rm31, currentAddress);
+                
+                // 执行 XOR 操作
+                const result31 = dstValue31 ^ srcValue31;
+                
+                // 写回结果（支持所有寻址模式）
+                this.writeRM16(mod31, rm31, currentAddress, result31);
+                
+                // 更新标志位
+                this.updateFlags16(result31, dstValue31, srcValue31);
+                
+                // 计算指令长度
                 if (mod31 === 3) {
-                    // 寄存器到寄存器 XOR
-                    const srcValue = this.getRegister(regToName31[reg31]);
-                    const dstValue = this.getRegister(rmToName31[rm31]);
-                    const result31 = dstValue ^ srcValue;
-                    this.setRegister(rmToName31[rm31], result31 & 0xffff);
-                    this.updateFlags16(result31, dstValue, srcValue);
                     instructionLength = 2;
                 } else {
-                    console.error(`执行错误: 不支持的寻址模式 mod=${mod31}`);
-                    this.running = false;
-                    return false;
+                    const ea = this.calculateEffectiveAddress(mod31, rm31, currentAddress);
+                    instructionLength = 2 + ea.displacementSize;
                 }
                 break;
             case 0x87: // XCHG r/m16, r16
@@ -679,20 +852,28 @@ class CPU8086 {
 
                 // 寄存器映射
                 const regToName21 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-                const rmToName21 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-
+                
+                // 读取源寄存器值
+                const srcValue21 = this.getRegister(regToName21[reg21]);
+                
+                // 读取目标操作数值（支持所有寻址模式）
+                const dstValue21 = this.readRM16(mod21, rm21, currentAddress);
+                
+                // 执行 AND 操作
+                const result21 = dstValue21 & srcValue21;
+                
+                // 写回结果（支持所有寻址模式）
+                this.writeRM16(mod21, rm21, currentAddress, result21);
+                
+                // 更新标志位
+                this.updateFlags16(result21, dstValue21, srcValue21);
+                
+                // 计算指令长度
                 if (mod21 === 3) {
-                    // 寄存器到寄存器 AND
-                    const srcValue21 = this.getRegister(regToName21[reg21]);
-                    const dstValue21 = this.getRegister(rmToName21[rm21]);
-                    const result21 = dstValue21 & srcValue21;
-                    this.setRegister(rmToName21[rm21], result21 & 0xffff);
-                    this.updateFlags16(result21, dstValue21, srcValue21);
                     instructionLength = 2;
                 } else {
-                    console.error(`执行错误: 不支持的寻址模式 mod=${mod21}`);
-                    this.running = false;
-                    return false;
+                    const ea = this.calculateEffectiveAddress(mod21, rm21, currentAddress);
+                    instructionLength = 2 + ea.displacementSize;
                 }
                 break;
             case 0x23: // AND r/m16, r16
@@ -703,20 +884,28 @@ class CPU8086 {
 
                 // 寄存器映射
                 const regToName23 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-                const rmToName23 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-
+                
+                // 读取源寄存器值
+                const srcValue23 = this.getRegister(regToName23[reg23]);
+                
+                // 读取目标操作数值（支持所有寻址模式）
+                const dstValue23 = this.readRM16(mod23, rm23, currentAddress);
+                
+                // 执行 AND 操作
+                const result23 = dstValue23 & srcValue23;
+                
+                // 写回结果（支持所有寻址模式）
+                this.writeRM16(mod23, rm23, currentAddress, result23);
+                
+                // 更新标志位
+                this.updateFlags16(result23, dstValue23, srcValue23);
+                
+                // 计算指令长度
                 if (mod23 === 3) {
-                    // 寄存器到寄存器 AND
-                    const srcValue = this.getRegister(regToName23[reg23]);
-                    const dstValue = this.getRegister(rmToName23[rm23]);
-                    const result23 = dstValue & srcValue;
-                    this.setRegister(rmToName23[rm23], result23 & 0xffff);
-                    this.updateFlags16(result23, dstValue, srcValue);
                     instructionLength = 2;
                 } else {
-                    console.error(`执行错误: 不支持的寻址模式 mod=${mod23}`);
-                    this.running = false;
-                    return false;
+                    const ea = this.calculateEffectiveAddress(mod23, rm23, currentAddress);
+                    instructionLength = 2 + ea.displacementSize;
                 }
                 break;
             case 0x09: // OR r/m16, r16
@@ -727,20 +916,28 @@ class CPU8086 {
 
                 // 寄存器映射
                 const regToName09 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-                const rmToName09 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-
+                
+                // 读取源寄存器值
+                const srcValue09 = this.getRegister(regToName09[reg09]);
+                
+                // 读取目标操作数值（支持所有寻址模式）
+                const dstValue09 = this.readRM16(mod09, rm09, currentAddress);
+                
+                // 执行 OR 操作
+                const result09 = dstValue09 | srcValue09;
+                
+                // 写回结果（支持所有寻址模式）
+                this.writeRM16(mod09, rm09, currentAddress, result09);
+                
+                // 更新标志位
+                this.updateFlags16(result09, dstValue09, srcValue09);
+                
+                // 计算指令长度
                 if (mod09 === 3) {
-                    // 寄存器到寄存器 OR
-                    const srcValue = this.getRegister(regToName09[reg09]);
-                    const dstValue = this.getRegister(rmToName09[rm09]);
-                    const result09 = dstValue | srcValue;
-                    this.setRegister(rmToName09[rm09], result09 & 0xffff);
-                    this.updateFlags16(result09, dstValue, srcValue);
                     instructionLength = 2;
                 } else {
-                    console.error(`执行错误: 不支持的寻址模式 mod=${mod09}`);
-                    this.running = false;
-                    return false;
+                    const ea = this.calculateEffectiveAddress(mod09, rm09, currentAddress);
+                    instructionLength = 2 + ea.displacementSize;
                 }
                 break;
             case 0x01: // ADD r/m16, r16
@@ -751,20 +948,28 @@ class CPU8086 {
 
                 // 寄存器映射
                 const regToName01 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-                const rmToName01 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-
+                
+                // 读取源寄存器值
+                const srcValue01 = this.getRegister(regToName01[reg01]);
+                
+                // 读取目标操作数值（支持所有寻址模式）
+                const dstValue01 = this.readRM16(mod01, rm01, currentAddress);
+                
+                // 执行 ADD 操作
+                const result01 = dstValue01 + srcValue01;
+                
+                // 写回结果（支持所有寻址模式）
+                this.writeRM16(mod01, rm01, currentAddress, result01);
+                
+                // 更新标志位
+                this.updateFlags16(result01, dstValue01, srcValue01);
+                
+                // 计算指令长度
                 if (mod01 === 3) {
-                    // 寄存器到寄存器 ADD
-                    const srcValue = this.getRegister(regToName01[reg01]);
-                    const dstValue = this.getRegister(rmToName01[rm01]);
-                    const result01 = dstValue + srcValue;
-                    this.setRegister(rmToName01[rm01], result01 & 0xffff);
-                    this.updateFlags16(result01, dstValue, srcValue);
                     instructionLength = 2;
                 } else {
-                    console.error(`执行错误: 不支持的寻址模式 mod=${mod01}`);
-                    this.running = false;
-                    return false;
+                    const ea = this.calculateEffectiveAddress(mod01, rm01, currentAddress);
+                    instructionLength = 2 + ea.displacementSize;
                 }
                 break;
             case 0x8b: // MOV Gv, Ev (Gv是目标，Ev是源)
@@ -843,7 +1048,7 @@ class CPU8086 {
                     }
                 }
                 break;
-            case 0x8a: // MOV Gb, Eb (Gb是目标，Eb是源) - 8位版本
+            case 0x8a: { // MOV Gb, Eb (Gb是目标，Eb是源) - 8位版本
                 const modrm8a = this.readMemory8(currentAddress + 1);
                 const reg8a = (modrm8a >> 3) & 0x7;
                 const rm8a = modrm8a & 0x7;
@@ -949,6 +1154,7 @@ class CPU8086 {
                     }
                 }
                 break;
+            }
             case 0x88: // MOV Eb, Gb (Gb是源，Eb是目标) - 8位版本
                 const modrm88 = this.readMemory8(currentAddress + 1);
                 const reg88 = (modrm88 >> 3) & 0x7;
@@ -1037,7 +1243,7 @@ class CPU8086 {
                     }
                 }
                 break;
-            case 0x89: // MOV Ev, Gv (Gv是源，Ev是目标)
+            case 0x89: { // MOV Ev, Gv (Gv是源，Ev是目标)
                 const modrm89 = this.readMemory8(currentAddress + 1);
                 const reg89 = (modrm89 >> 3) & 0x7;
                 const rm89 = modrm89 & 0x7;
@@ -1116,6 +1322,7 @@ class CPU8086 {
                     }
                 }
                 break;
+            }
             case 0xb0: // MOV AL, imm8
                 const imm8al = this.readMemory8(currentAddress + 1);
                 const currentAx = this.getRegister('ax');
@@ -1307,16 +1514,16 @@ class CPU8086 {
                 // 调用对应的中断处理程序
                 if (interruptNum === 0x21) {
                     // INT 21h - DOS功能调用
-                    const result = this.handleInt21();
-                    if (!result) {
+                    const result21 = this.handleInt21();
+                    if (!result21) {
                         return false; // 暂停执行（如等待输入）
                     }
                     // handler已经更新了IP，不需要再增加
                     instructionLength = 0;
                 } else if (interruptNum === 0x16) {
                     // INT 16h - BIOS键盘服务
-                    const result = this.handleInt16();
-                    if (!result) {
+                    const result16 = this.handleInt16();
+                    if (!result16) {
                         return false; // 暂停执行（如等待输入）
                     }
                     // handler已经更新了IP，不需要再增加
@@ -1497,12 +1704,7 @@ class CPU8086 {
                         // SHR
                         carryOut = oldValue & 0x0001;
                         result = (oldValue >> 1) & 0xffff;
-                    } else {
-                        console.error(`执行错误: 不支持的移位操作码 ${reg16}`);
-                        this.running = false;
-                        return false;
                     }
-
                     this.setRegister(destReg, result);
                     // 设置标志位
                     this.flags.cf = carryOut;
@@ -1521,6 +1723,321 @@ class CPU8086 {
                     console.error(`执行错误: 不支持的寻址模式 mod=${mod16}`);
                     this.running = false;
                     return false;
+                }
+                break;
+            case 0xd2: // SHL/SHR/ROL/ROR r/m8, CL
+                const modrm8cl = this.readMemory8(currentAddress + 1);
+                const reg8cl = (modrm8cl >> 3) & 0x7; // 0=ROL, 1=ROR, 4=SHL, 5=SHR
+                const mod8cl = (modrm8cl >> 6) & 0x3;
+                const rm8cl = modrm8cl & 0x7;
+
+                // 8位寄存器映射
+                const rmToName8cl = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+                const isHighBytecl = [false, false, false, false, true, true, true, true];
+
+                // 读取操作数值（支持所有寻址模式）
+                let oldByteValue8;
+                let oldValue8;
+                let destReg8;
+                
+                if (mod8cl === 3) {
+                    // 寄存器模式
+                    destReg8 = rmToName8cl[rm8cl];
+                    oldValue8 = this.getRegister(destReg8);
+                    oldByteValue8 = isHighBytecl[rm8cl] ? (oldValue8 >> 8) & 0xff : oldValue8 & 0xff;
+                } else {
+                    // 内存模式
+                    oldByteValue8 = this.readRM8(mod8cl, rm8cl, currentAddress);
+                }
+                
+                const shiftCount8 = this.getRegister('cx') & 0xff;
+                let result8 = oldByteValue8;
+                let carryOut8 = 0;
+
+                if (reg8cl === 0) {
+                    // ROL - 循环左移
+                    for (let i = 0; i < shiftCount8; i++) {
+                        carryOut8 = (result8 & 0x80) >> 7;
+                        result8 = ((result8 << 1) | carryOut8) & 0xff;
+                    }
+                } else if (reg8cl === 1) {
+                    // ROR - 循环右移
+                    for (let i = 0; i < shiftCount8; i++) {
+                        carryOut8 = result8 & 0x01;
+                        result8 = ((result8 >> 1) | (carryOut8 << 7)) & 0xff;
+                    }
+                } else if (reg8cl === 4) {
+                    // SHL
+                    for (let i = 0; i < shiftCount8; i++) {
+                        carryOut8 = (result8 & 0x80) >> 7;
+                        result8 = (result8 << 1) & 0xff;
+                    }
+                } else if (reg8cl === 5) {
+                    // SHR
+                    for (let i = 0; i < shiftCount8; i++) {
+                        carryOut8 = result8 & 0x01;
+                        result8 = (result8 >> 1) & 0xff;
+                    }
+                }
+
+                // 写回结果（支持所有寻址模式）
+                if (mod8cl === 3) {
+                    // 寄存器模式
+                    if (isHighBytecl[rm8cl]) {
+                        this.setRegister(destReg8, (oldValue8 & 0x00ff) | (result8 << 8));
+                    } else {
+                        this.setRegister(destReg8, (oldValue8 & 0xff00) | result8);
+                    }
+                } else {
+                    // 内存模式
+                    this.writeRM8(mod8cl, rm8cl, currentAddress, result8);
+                }
+                
+                // 设置标志位
+                this.flags.cf = carryOut8;
+                this.flags.zf = (result8 === 0) ? 1 : 0;
+                this.flags.sf = (result8 & 0x80) ? 1 : 0;
+                // 计算奇偶标志
+                let paritycl = 0;
+                let valuecl = result8;
+                for (let i = 0; i < 8; i++) {
+                    paritycl += valuecl & 1;
+                    valuecl >>= 1;
+                }
+                this.flags.pf = (paritycl % 2 === 0) ? 1 : 0;
+                
+                // 计算指令长度
+                if (mod8cl === 3) {
+                    instructionLength = 2;
+                } else {
+                    const ea = this.calculateEffectiveAddress(mod8cl, rm8cl, currentAddress);
+                    instructionLength = 2 + ea.displacementSize;
+                }
+                break;
+            case 0xd3: // SHL/SHR/ROL/ROR r/m16, CL
+                const modrm16cl = this.readMemory8(currentAddress + 1);
+                const reg16cl = (modrm16cl >> 3) & 0x7; // 0=ROL, 1=ROR, 4=SHL, 5=SHR
+                const mod16cl = (modrm16cl >> 6) & 0x3;
+                const rm16cl = modrm16cl & 0x7;
+
+                // 16位寄存器映射
+                const rmToName16cl = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+
+                // 读取操作数值（支持所有寻址模式）
+                let oldValue16cl;
+                let destReg16cl;
+                
+                if (mod16cl === 3) {
+                    // 寄存器模式
+                    destReg16cl = rmToName16cl[rm16cl];
+                    oldValue16cl = this.getRegister(destReg16cl);
+                } else {
+                    // 内存模式
+                    oldValue16cl = this.readRM16(mod16cl, rm16cl, currentAddress);
+                }
+                
+                const shiftCount16cl = this.getRegister('cx') & 0xff;
+                let result16cl = oldValue16cl;
+                let carryOut16cl = 0;
+
+                if (reg16cl === 0) {
+                    // ROL - 循环左移
+                    for (let i = 0; i < shiftCount16cl; i++) {
+                        carryOut16cl = (result16cl & 0x8000) >> 15;
+                        result16cl = ((result16cl << 1) | carryOut16cl) & 0xffff;
+                    }
+                } else if (reg16cl === 1) {
+                    // ROR - 循环右移
+                    for (let i = 0; i < shiftCount16cl; i++) {
+                        carryOut16cl = result16cl & 0x0001;
+                        result16cl = ((result16cl >> 1) | (carryOut16cl << 15)) & 0xffff;
+                    }
+                } else if (reg16cl === 4) {
+                    // SHL
+                    for (let i = 0; i < shiftCount16cl; i++) {
+                        carryOut16cl = (result16cl & 0x8000) >> 15;
+                        result16cl = (result16cl << 1) & 0xffff;
+                    }
+                } else if (reg16cl === 5) {
+                    // SHR
+                    for (let i = 0; i < shiftCount16cl; i++) {
+                        carryOut16cl = result16cl & 0x0001;
+                        result16cl = (result16cl >> 1) & 0xffff;
+                    }
+                }
+
+                // 写回结果（支持所有寻址模式）
+                if (mod16cl === 3) {
+                    // 寄存器模式
+                    this.setRegister(destReg16cl, result16cl);
+                } else {
+                    // 内存模式
+                    this.writeRM16(mod16cl, rm16cl, currentAddress, result16cl);
+                }
+                
+                // 设置标志位
+                this.flags.cf = carryOut16cl;
+                this.flags.zf = (result16cl === 0) ? 1 : 0;
+                this.flags.sf = (result16cl & 0x8000) ? 1 : 0;
+                // 计算奇偶标志（基于低8位）
+                let parity16cl = 0;
+                let value16cl = result16cl & 0xff;
+                for (let i = 0; i < 8; i++) {
+                    parity16cl += value16cl & 1;
+                    value16cl >>= 1;
+                }
+                this.flags.pf = (parity16cl % 2 === 0) ? 1 : 0;
+                
+                // 计算指令长度
+                if (mod16cl === 3) {
+                    instructionLength = 2;
+                } else {
+                    const ea = this.calculateEffectiveAddress(mod16cl, rm16cl, currentAddress);
+                    instructionLength = 2 + ea.displacementSize;
+                }
+                break;
+            case 0x80: // ADD/OR/ADC/SBB/AND/SUB/CMP/XOR r/m8, imm8
+                const modrm80 = this.readMemory8(currentAddress + 1);
+                const reg80 = (modrm80 >> 3) & 0x7; // 0=ADD, 1=OR, 2=ADC, 3=SBB, 4=AND, 5=SUB, 7=CMP
+                const mod80 = (modrm80 >> 6) & 0x3;
+                const rm80 = modrm80 & 0x7;
+                const imm80 = this.readMemory8(currentAddress + 2);
+
+                // 8位寄存器映射
+                const rmToName80 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+                const isHighByte80 = [false, false, false, false, true, true, true, true];
+
+                // 读取操作数值（支持所有寻址模式）
+                let oldByteValue;
+                let oldValue;
+                let destReg;
+                
+                if (mod80 === 3) {
+                    // 寄存器模式
+                    destReg = rmToName80[rm80];
+                    oldValue = this.getRegister(destReg);
+                    oldByteValue = isHighByte80[rm80] ? (oldValue >> 8) & 0xff : oldValue & 0xff;
+                } else {
+                    // 内存模式
+                    oldByteValue = this.readRM8(mod80, rm80, currentAddress);
+                }
+                
+                let result;
+
+                if (reg80 === 0) {
+                    // ADD r/m8, imm8
+                    result = oldByteValue + imm80;
+                    this.updateFlags8(result, oldByteValue, imm80, 'add');
+                } else if (reg80 === 4) {
+                    // AND r/m8, imm8
+                    result = oldByteValue & imm80;
+                    this.updateFlags8(result, oldByteValue, imm80, 'and');
+                } else if (reg80 === 7) {
+                    // CMP r/m8, imm8
+                    result = oldByteValue - imm80;
+                    this.updateFlags8(result, oldByteValue, imm80, 'sub');
+                    // CMP 不修改目标寄存器
+                    if (mod80 === 3) {
+                        instructionLength = 3;
+                    } else {
+                        const ea = this.calculateEffectiveAddress(mod80, rm80, currentAddress);
+                        instructionLength = 3 + ea.displacementSize;
+                    }
+                    break;
+                } else {
+                    console.error(`执行错误: 不支持的8位立即数操作 reg=${reg80}`);
+                    this.running = false;
+                    return false;
+                }
+
+                // 写回结果（支持所有寻址模式）
+                const newByteValue = result & 0xff;
+                if (mod80 === 3) {
+                    // 寄存器模式
+                    if (isHighByte80[rm80]) {
+                        this.setRegister(destReg, (oldValue & 0x00ff) | (newByteValue << 8));
+                    } else {
+                        this.setRegister(destReg, (oldValue & 0xff00) | newByteValue);
+                    }
+                } else {
+                    // 内存模式
+                    this.writeRM8(mod80, rm80, currentAddress, newByteValue);
+                }
+                
+                // 计算指令长度
+                if (mod80 === 3) {
+                    instructionLength = 3;
+                } else {
+                    const ea = this.calculateEffectiveAddress(mod80, rm80, currentAddress);
+                    instructionLength = 3 + ea.displacementSize;
+                }
+                break;
+            case 0x81: // ADD/OR/ADC/SBB/AND/SUB/CMP/XOR r/m16, imm16
+                const modrm81 = this.readMemory8(currentAddress + 1);
+                const reg81 = (modrm81 >> 3) & 0x7; // 0=ADD, 1=OR, 2=ADC, 3=SBB, 4=AND, 5=SUB, 7=CMP
+                const mod81 = (modrm81 >> 6) & 0x3;
+                const rm81 = modrm81 & 0x7;
+                const imm1681 = this.readMemory16(currentAddress + 2);
+
+                // 16位寄存器映射
+                const rmToName81 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+
+                // 读取操作数值（支持所有寻址模式）
+                let oldValue81;
+                let destReg81;
+                
+                if (mod81 === 3) {
+                    // 寄存器模式
+                    destReg81 = rmToName81[rm81];
+                    oldValue81 = this.getRegister(destReg81);
+                } else {
+                    // 内存模式
+                    oldValue81 = this.readRM16(mod81, rm81, currentAddress);
+                }
+                
+                let result81;
+
+                if (reg81 === 0) {
+                    // ADD r/m16, imm16
+                    result81 = oldValue81 + imm1681;
+                    this.updateFlags16(result81, oldValue81, imm1681, 'add');
+                } else if (reg81 === 4) {
+                    // AND r/m16, imm16
+                    result81 = oldValue81 & imm1681;
+                    this.updateFlags16(result81, oldValue81, imm1681, 'and');
+                } else if (reg81 === 7) {
+                    // CMP r/m16, imm16
+                    result81 = oldValue81 - imm1681;
+                    this.updateFlags16(result81, oldValue81, imm1681, 'sub');
+                    // CMP 不修改目标寄存器
+                    if (mod81 === 3) {
+                        instructionLength = 4;
+                    } else {
+                        const ea = this.calculateEffectiveAddress(mod81, rm81, currentAddress);
+                        instructionLength = 4 + ea.displacementSize;
+                    }
+                    break;
+                } else {
+                    console.error(`执行错误: 不支持的16位立即数操作 reg=${reg81}`);
+                    this.running = false;
+                    return false;
+                }
+
+                // 写回结果（支持所有寻址模式）
+                if (mod81 === 3) {
+                    // 寄存器模式
+                    this.setRegister(destReg81, result81 & 0xffff);
+                } else {
+                    // 内存模式
+                    this.writeRM16(mod81, rm81, currentAddress, result81);
+                }
+                
+                // 计算指令长度
+                if (mod81 === 3) {
+                    instructionLength = 4;
+                } else {
+                    const ea = this.calculateEffectiveAddress(mod81, rm81, currentAddress);
+                    instructionLength = 4 + ea.displacementSize;
                 }
                 break;
             case 0xf6: { // Group 3 r/m8
@@ -1783,6 +2300,12 @@ class CPU8086 {
                 this.setRegister('sp', this.getRegister('sp') - 2);
                 const stackAddress9 = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
                 this.writeMemory16(stackAddress9, this.getRegister('di'));
+                instructionLength = 1;
+                break;
+            case 0x16: // PUSH SS
+                this.setRegister('sp', this.getRegister('sp') - 2);
+                const stackAddress16 = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
+                this.writeMemory16(stackAddress16, this.getSegmentRegister('ss'));
                 instructionLength = 1;
                 break;
             case 0x5e: // POP SI
@@ -2202,7 +2725,7 @@ class CPU8086 {
                 this.flags.of = (signedResult16 !== signedOperand116 - signedOperand216) ? 1 : 0;
                 instructionLength = 3;
                 break;
-            case 0x39: // CMP r/m16, r16
+            case 0x39: { // CMP r/m16, r16
                 const modrm39 = this.readMemory8(currentAddress + 1);
                 const reg39 = (modrm39 >> 3) & 0x7;
                 const mod39 = (modrm39 >> 6) & 0x3;
@@ -2226,6 +2749,7 @@ class CPU8086 {
                     return false;
                 }
                 break;
+            }
             case 0x3a: // CMP r8, r/m8
                 const modrm3a = this.readMemory8(currentAddress + 1);
                 const reg3a = (modrm3a >> 3) & 0x7;
@@ -2316,6 +2840,14 @@ class CPU8086 {
                 this.ip = (this.ip + 2 + signedOffset) & 0xffff;
                 instructionLength = 0; // 不增加IP，因为已经手动设置了
                 break;
+            case 0xe9: // JMP near
+                const offset16jmp = this.readMemory16(currentAddress + 1);
+                // 符号扩展（16位有符号数）
+                const signedOffset16 = offset16jmp > 0x7fff ? offset16jmp - 0x10000 : offset16jmp;
+                // 跳转到目标地址：当前IP + 指令长度(3) + 偏移量
+                this.ip = (this.ip + 3 + signedOffset16) & 0xffff;
+                instructionLength = 0; // 不增加IP，因为已经手动设置了
+                break;
             case 0x7c: // JL short
                 const offset8jl = this.readMemory8(currentAddress + 1);
                 // JL: 小于跳转，条件是 SF !== OF
@@ -2372,14 +2904,12 @@ class CPU8086 {
                     instructionLength = 2;
                 }
                 break;
-            case 0x81: // Group - ADD/OR/ADC/SBB/AND/SUB/XOR/CMP Ev, Iv
-                const modrm81 = this.readMemory8(currentAddress + 1);
-                const reg81 = (modrm81 >> 3) & 0x7; // 扩展操作码
-                const mod81 = (modrm81 >> 6) & 0x3;
-                const rm81 = modrm81 & 0x7;
-
-                // 读取立即数
-                const imm16_81 = this.readMemory16(currentAddress + 2);
+            case 0x81: // Group - ADD/OR/ADC/SBB/AND/SUB/XOR/CMP Ev, Iv (已在前面实现)
+                // 此case已在前面实现，这里不再重复
+                console.error(`执行错误: 重复的case 0x81`);
+                this.running = false;
+                return false;
+                break;
                 
                 // 目标寄存器映射 (r/m字段，当mod=11时)
                 const rmToName = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
@@ -2473,7 +3003,7 @@ class CPU8086 {
                     return false;
                 }
                 break;
-            case 0x8d: // LEA r16, m
+            case 0x8d: { // LEA r16, m
                 const modrm8d = this.readMemory8(currentAddress + 1);
                 const reg8d = (modrm8d >> 3) & 0x7; // 目标寄存器
                 const mod8d = (modrm8d >> 6) & 0x3;
@@ -2500,7 +3030,8 @@ class CPU8086 {
                     return false;
                 }
                 break;
-            case 0x8e: // MOV Sreg, r/m16 (从通用寄存器/内存到段寄存器)
+            }
+            case 0x8e: { // MOV Sreg, r/m16 (从通用寄存器/内存到段寄存器)
                 const modrm8e = this.readMemory8(currentAddress + 1);
                 const reg8e = (modrm8e >> 3) & 0x7; // 段寄存器：0=ES, 1=CS, 2=SS, 3=DS
                 const rm8e = modrm8e & 0x7;
@@ -2522,6 +3053,7 @@ class CPU8086 {
                     return false;
                 }
                 break;
+            }
             case 0xc6: // MOV r/m8, imm8
                 const modrm_c6 = this.readMemory8(currentAddress + 1);
                 const reg_c6 = (modrm_c6 >> 3) & 0x7; // 扩展操作码，必须为0
@@ -2858,7 +3390,12 @@ class CPU8086 {
         
         // 进位标志
         if (operation === 'add' || operation === 'sub') {
-            this.flags.cf = result > 0xff ? 1 : 0;
+            // 对于减法，检查是否借位（无符号数溢出）
+            if (operation === 'sub') {
+                this.flags.cf = operand1 < operand2 ? 1 : 0;
+            } else {
+                this.flags.cf = result > 0xff ? 1 : 0;
+            }
         } else {
             this.flags.cf = 0; // AND/OR/XOR 进位标志为0
         }
@@ -3067,6 +3604,10 @@ class CPU8086 {
                 return this.int21AH0AStringInput();
             case 0x4c:
                 return this.int21AH4CExit();
+            case 0x20:
+                // AH=20 不是标准 DOS 功能号，可能是程序错误
+                // 直接返回避免陷入警告循环
+                return true;
             default:
                 console.warn(`未实现的INT 21h功能: AH=${ah.toString(16).padStart(2, '0')}`);
                 return true; // 继续执行
