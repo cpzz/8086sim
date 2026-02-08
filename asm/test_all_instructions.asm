@@ -8,13 +8,13 @@
 
 .DATA
     ; 数据定义测试
-    byte_val    DB 12h           ; 单个字节
-    word_val    DW 1234h         ; 一个字
-    dword_val   DD 12345678h     ; 双字
-    string      DB 'HELLO$'      ; 字符串
-    array       DB 1,2,3,4,5     ; 数组
-    buffer      DB 10 DUP(0)     ; 10个0
-    uninit      DB ?             ; 未初始化
+    BYTE_VAL    DB 12h           ; 单个字节
+    WORD_VAL    DW 1234h         ; 一个字
+    DWORD_VAL   DD 12345678h     ; 双字
+    STRING      DB 'HELLO$'      ; 字符串
+    ARRAY       DB 1,2,3,4,5     ; 数组
+    BUFFER      DB 10 DUP(0)     ; 10个0
+    UNINIT      DB ?             ; 未初始化
     
     ; 常量定义
     MAX_SIZE    EQU 100
@@ -24,7 +24,7 @@
     EOS         EQU '$'
 
 .CODE
-main PROC
+MAIN PROC
     MOV AX, @DATA                ; AX = 数据段地址
     MOV DS, AX                   ; DS = AX，设置数据段寄存器
     
@@ -33,8 +33,8 @@ main PROC
     ; MOV指令测试
     MOV AX, 1234h                ; AX = 1234h
     MOV BX, AX                   ; BX = 1234h
-    MOV CX, [word_val]           ; CX = 1234h
-    MOV [buffer], AL             ; buffer[0] = 34h
+    MOV CX, [WORD_VAL]           ; CX = 1234h
+    MOV [BUFFER], AL             ; BUFFER[0] = 34h
     
     ; XCHG指令测试
     XCHG AX, BX                  ; AX = 1234h, BX = 1234h (交换后不变)
@@ -52,7 +52,7 @@ main PROC
     POPF                         ; 标志寄存器出栈
     
     ; LEA指令测试
-    LEA SI, string               ; SI = string的偏移地址
+    LEA SI, STRING               ; SI = STRING的偏移地址
     
     ; ==================== 算术运算指令测试 ====================
     
@@ -141,42 +141,42 @@ main PROC
     ; ==================== 控制转移指令测试 ====================
     
     ; JMP指令测试
-    JMP SHORT label1             ; 跳转到label1
+    JMP SHORT LABEL1             ; 跳转到LABEL1
     
-label2:
+LABEL2:
     MOV AX, 1111h                ; 不会执行到这里
     
-label1:
+LABEL1:
     MOV AX, 2222h                ; AX = 2222h
     
     ; 条件跳转测试
     MOV AX, 10
     CMP AX, 10
-    JZ equal_label               ; ZF=1，跳转到equal_label
-    JMP not_equal_label          ; 不会执行到这里
+    JZ EQUAL_LABEL               ; ZF=1，跳转到EQUAL_LABEL
+    JMP NOT_EQUAL_LABEL          ; 不会执行到这里
     
-not_equal_label:
+NOT_EQUAL_LABEL:
     MOV BX, 0                    ; 不会执行到这里
     
- equal_label:
+EQUAL_LABEL:
     MOV BX, 1                    ; BX = 0001h
     
     ; LOOP指令测试
     MOV CX, 5                    ; CX = 0005h
-loop_test:
+LOOP_TEST:
     NOP                          ; 空操作
-    LOOP loop_test               ; CX减1，CX≠0则循环，最终CX=0
+    LOOP LOOP_TEST               ; CX减1，CX≠0则循环，最终CX=0
     
     ; ==================== 串操作指令测试 ====================
     
     ; 串操作准备
     CLD                          ; 方向标志DF=0，正向
-    LEA SI, string               ; SI指向源串
-    LEA DI, buffer               ; DI指向目标串
+    LEA SI, STRING               ; SI指向源串
+    LEA DI, BUFFER               ; DI指向目标串
     MOV CX, 5                    ; CX=5，串长度
     
     ; MOVSB指令测试
-    REP MOVSB                    ; 将string的前5字节复制到buffer
+    REP MOVSB                    ; 将STRING的前5字节复制到BUFFER
     
     ; ==================== 处理器控制指令测试 ====================
     
@@ -202,6 +202,6 @@ loop_test:
     MOV AL, 00h                  ; 返回码0
     INT 21h                      ; 调用DOS中断
     
-main ENDP
+MAIN ENDP
 
-END main
+END MAIN

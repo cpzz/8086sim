@@ -225,9 +225,9 @@ OUTER_BOTTOM:
     CALL PRINT_CHAR
     CALL NEWLINE
     
-    ; ========== 程序结束 ==========
-    MOV AH, 4CH
-    INT 21H
+; ========== 程序结束 ==========
+MOV AH, 4CH
+INT 21H
 
 ; 打印单个字符子程序
 PRINT_CHAR:

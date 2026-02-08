@@ -8,6 +8,7 @@ class Assembler {
         this.codePaddings = []; // 存放代码段的对齐填充（如 EVEN 插入的 NOP）
         this.codeDataSegments = []; // 存放代码段中的数据定义（如 ALL_CHARS_MSG DB ...）
         this.equDefinitions = []; // EQU常量定义
+        this.dataVariables = []; // 数据段中定义的变量
         this.currentSegment = 'code'; // 当前所在的段（data/code）
         this.model = 'small'; // 默认内存模型
         this.stackSize = 256; // 默认堆栈大小（100H）
@@ -212,6 +213,10 @@ class Assembler {
                 if (potentialLabel && !potentialLabel.startsWith(';')) {
                     this.symbols[potentialLabel] = address;
                     this.symbolOriginalCase[potentialLabel.toLowerCase()] = potentialLabel; // 保存原始大小写
+                    // 如果在数据段，记录变量名
+                    if (this.currentSegment === 'data') {
+                        this.dataVariables.push(potentialLabel);
+                    }
                 }
 
                 const dataPart = line.substring(dbIndex + 4).trim();
@@ -243,6 +248,10 @@ class Assembler {
                 if (potentialLabel && !potentialLabel.startsWith(';')) {
                     this.symbols[potentialLabel] = address;
                     this.symbolOriginalCase[potentialLabel.toLowerCase()] = potentialLabel; // 保存原始大小写
+                    // 如果在数据段，记录变量名
+                    if (this.currentSegment === 'data') {
+                        this.dataVariables.push(potentialLabel);
+                    }
                 }
 
                 const dataPart = line.substring(dwIndex + 4).trim();
@@ -274,6 +283,10 @@ class Assembler {
                 if (potentialLabel && !potentialLabel.startsWith(';')) {
                     this.symbols[potentialLabel] = address;
                     this.symbolOriginalCase[potentialLabel.toLowerCase()] = potentialLabel; // 保存原始大小写
+                    // 如果在数据段，记录变量名
+                    if (this.currentSegment === 'data') {
+                        this.dataVariables.push(potentialLabel);
+                    }
                 }
 
                 const dataPart = line.substring(ddIndex + 4).trim();
@@ -418,8 +431,11 @@ class Assembler {
                 // 提取标签名称
                 const potentialLabel = line.substring(0, procIndex).trim();
                 if (potentialLabel && !potentialLabel.startsWith(';')) {
+                    // PROC标签的地址应该是PROC后的第一条指令地址
+                    // 由于PROC行本身不占用空间，地址保持不变
                     this.symbols[potentialLabel] = address;
                     this.symbolOriginalCase[potentialLabel.toLowerCase()] = potentialLabel; // 保存原始大小写
+                    // 记录PROC标签的地址
                 }
                 // proc伪指令本身不占用空间
                 continue;
@@ -822,7 +838,19 @@ class Assembler {
     fixJumpOffsets() {
         for (let i = 0; i < this.instructions.length; i++) {
             const instr = this.instructions[i];
-            if (instr.opcode &&
+            
+            // 处理CALL指令
+            if (instr.opcode === 'CALL' && instr.length === 3 && instr.operands && instr.operands.length > 0) {
+                const targetLabel = instr.operands[0];
+                if (typeof targetLabel === 'string' && this.symbols[targetLabel.toUpperCase()]) {
+                    const targetAddr = this.symbols[targetLabel.toUpperCase()];
+                    const newOffset = targetAddr - (instr.address + 3);
+                    instr.machineCode[1] = newOffset & 0xff;
+                    instr.machineCode[2] = (newOffset >> 8) & 0xff;
+                }
+            }
+            // 处理JMP和其他跳转指令
+            else if (instr.opcode &&
                 ['JMP', 'JZ', 'JE', 'JNZ', 'JNE', 'JB', 'JC', 'JNAE', 'JNB', 'JAE', 'JNC',
                  'JS', 'JNS', 'JO', 'JNO', 'JP', 'JPE', 'JNP', 'JPO', 'JL', 'JNGE', 'JNL',
                  'JGE', 'JA', 'JNBE', 'JNA', 'JBE', 'JG', 'JNLE', 'JNG', 'JLE', 'LOOP',
@@ -1164,6 +1192,23 @@ class Assembler {
                         return 2;
                     }
                 }
+                // 检查是否是从数据段变量加载数据（例如 MOV DL, SINGLE_TOP_LEFT）
+                 // 这种指令在8086中通常为4字节（8A /r modrm disp16）
+                 else if (!operands[0].includes('[') && !operands[1].includes('[')) {
+                     // 检查第一个操作数是否是寄存器，第二个操作数是否是已知标签
+                     const isDestReg8 = ['al', 'ah', 'bl', 'bh', 'cl', 'ch', 'dl', 'dh'].includes(operands[0].toLowerCase());
+                     const isDestReg16 = ['ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'].includes(operands[0].toLowerCase());
+                     const isSrcLabel = this.symbols.hasOwnProperty(operands[1].toLowerCase());
+                     // 如果是寄存器到寄存器的操作，不是我们要处理的情况
+                     const isRegToReg = (isDestReg8 || isDestReg16) && 
+                                       (['al', 'ah', 'bl', 'bh', 'cl', 'ch', 'dl', 'dh', 'ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'].includes(operands[1].toLowerCase()));
+                     
+                     if ((isDestReg8 || isDestReg16) && !isRegToReg) {
+                         // 如果不是寄存器到寄存器，很可能是MOV reg, label格式
+                         // MOV reg, label - 这种指令通常为4字节（对于8位寄存器）或3-4字节（对于16位寄存器）
+                         return isDestReg8 ? 4 : 3; // 8位寄存器：4字节；16位寄存器：3字节
+                     }
+                 }
                 // 内存寻址操作：最坏情况4字节
                 if (operands[0].includes('[') || operands[1].includes('[')) {
                     return 4;
@@ -1390,6 +1435,40 @@ class Assembler {
             case 'enter':
                 return 4;
             case 'xchg':
+                if (operands.length === 2) {
+                    const op0 = operands[0];
+                    const op1 = operands[1];
+                    
+                    const isMemoryOperand = (op) => {
+                        const cleanOp = op.replace(/\b(byte|word)\s+ptr\s+/gi, '').trim();
+                        return cleanOp.includes('[');
+                    };
+                    
+                    const op0IsMem = isMemoryOperand(op0);
+                    const op1IsMem = isMemoryOperand(op1);
+                    
+                    if (op0IsMem && op1IsMem) {
+                        return 0;
+                    } else if (op0IsMem || op1IsMem) {
+                        const memOp = op0IsMem ? op0 : op1;
+                        const match = memOp.match(/\[(.*?)\]/);
+                        if (match) {
+                            const inside = match[1].toLowerCase().trim();
+                            if (inside.includes('+')) {
+                                return 3;
+                            } else {
+                                return 4;
+                            }
+                        }
+                        return 4;
+                    } else {
+                        const axRegs = ['ax', 'bx', 'cx', 'dx'];
+                        if ((op0 === 'ax' && axRegs.includes(op1)) || (op1 === 'ax' && axRegs.includes(op0))) {
+                            return 1;
+                        }
+                        return 2;
+                    }
+                }
                 return 2;
             default:
                 return 2;
@@ -1694,6 +1773,8 @@ class Assembler {
         // 提取原始操作数（不转换为小写），用于标签匹配
         const originalOperands = operandsPartProcessed.split(/[,\s]+/).filter(Boolean);
 
+        const length = this.getInstructionLength(line);
+
         switch (opcode) {
             case 'nop':
                 return {
@@ -1701,7 +1782,7 @@ class Assembler {
                     opcode: 'NOP',
                     operands: [],
                     machineCode: [0x90],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'add':
@@ -1719,7 +1800,7 @@ class Assembler {
                             opcode: 'ADD',
                             operands: ['AL', operands[1]],
                             machineCode: [0x04, imm8],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     } else {
@@ -1731,10 +1812,10 @@ class Assembler {
                             opcode: 'ADD',
                             operands: [operands[0].toUpperCase(), operands[1]],
                             machineCode: [0x80, modRM, imm8],
-                            length: 3,
+                            length,
                             originalLine: originalLine.trim()
                         };
-                    }
+                        }
                 }
                 // 处理 ADD r16, imm16 指令
                 if (operands[0] === 'ax' && this.isImmediate(operands[1])) {
@@ -1744,7 +1825,7 @@ class Assembler {
                         opcode: 'ADD',
                         operands: ['AX', operands[1]],
                         machineCode: [0x05, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -1763,7 +1844,7 @@ class Assembler {
                         opcode: 'ADD',
                         operands: [operands[0].toUpperCase(), operands[1]],
                         machineCode: [0x81, modRM, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 4,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -1782,7 +1863,7 @@ class Assembler {
                         opcode: 'ADD',
                         operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
                         machineCode: [0x01, modRM],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -1797,7 +1878,7 @@ class Assembler {
                         opcode: 'ADD',
                         operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
                         machineCode: [0x00, modRM],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -1810,7 +1891,7 @@ class Assembler {
                         opcode: 'SUB',
                         operands: ['AL', operands[1]],
                         machineCode: [0x2c, imm8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -1821,7 +1902,7 @@ class Assembler {
                         opcode: 'SUB',
                         operands: ['AX', operands[1]],
                         machineCode: [0x2d, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -1832,7 +1913,7 @@ class Assembler {
                         opcode: 'SUB',
                         operands: ['BX', 'CX'],
                         machineCode: [0x29, 0xcb],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -1843,7 +1924,7 @@ class Assembler {
                         opcode: 'SUB',
                         operands: ['AX', 'CX'],
                         machineCode: [0x2b, 0xc8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -1854,7 +1935,7 @@ class Assembler {
                         opcode: 'SUB',
                         operands: ['AX', 'BX'],
                         machineCode: [0x2b, 0xd8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -1865,7 +1946,7 @@ class Assembler {
                         opcode: 'SUB',
                         operands: ['BX', 'AX'],
                         machineCode: [0x29, 0xd8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -1876,7 +1957,7 @@ class Assembler {
                         opcode: 'SUB',
                         operands: ['CX', 'AX'],
                         machineCode: [0x29, 0xc8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -1887,7 +1968,7 @@ class Assembler {
                         opcode: 'SUB',
                         operands: ['CX', 'BX'],
                         machineCode: [0x29, 0xd9],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -1898,7 +1979,7 @@ class Assembler {
                         opcode: 'SUB',
                         operands: ['DX', 'AX'],
                         machineCode: [0x29, 0xc2],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -1909,7 +1990,7 @@ class Assembler {
                         opcode: 'SUB',
                         operands: ['DX', 'BX'],
                         machineCode: [0x29, 0xda],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -1929,7 +2010,7 @@ class Assembler {
                         opcode: 'SUB',
                         operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
                         machineCode: [0x29, modRM],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -1949,7 +2030,7 @@ class Assembler {
                             opcode: 'AND',
                             operands: ['AL', operands[1]],
                             machineCode: [0x24, imm8],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     } else {
@@ -1961,7 +2042,7 @@ class Assembler {
                             opcode: 'AND',
                             operands: [operands[0].toUpperCase(), operands[1]],
                             machineCode: [0x80, modRM, imm8],
-                            length: 3,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -1974,7 +2055,7 @@ class Assembler {
                         opcode: 'AND',
                         operands: ['AX', operands[1]],
                         machineCode: [0x25, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -1993,7 +2074,7 @@ class Assembler {
                         opcode: 'AND',
                         operands: [operands[0].toUpperCase(), operands[1]],
                         machineCode: [0x81, modRM, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 4,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2012,7 +2093,7 @@ class Assembler {
                         opcode: 'AND',
                         operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
                         machineCode: [0x21, modRM],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2027,7 +2108,7 @@ class Assembler {
                         opcode: 'AND',
                         operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
                         machineCode: [0x20, modRM],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2040,7 +2121,7 @@ class Assembler {
                         opcode: 'OR',
                         operands: ['AL', operands[1]],
                         machineCode: [0x0c, imm8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2051,7 +2132,7 @@ class Assembler {
                         opcode: 'OR',
                         operands: ['AX', operands[1]],
                         machineCode: [0x0d, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2062,7 +2143,7 @@ class Assembler {
                         opcode: 'OR',
                         operands: ['BX', operands[1]],
                         machineCode: [0x81, 0xcb, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 4,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2081,7 +2162,7 @@ class Assembler {
                         opcode: 'OR',
                         operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
                         machineCode: [0x09, modRM],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2094,7 +2175,7 @@ class Assembler {
                         opcode: 'XOR',
                         operands: ['AL', operands[1]],
                         machineCode: [0x34, imm8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2105,7 +2186,7 @@ class Assembler {
                         opcode: 'XOR',
                         operands: ['AX', 'AX'],
                         machineCode: [0x31, 0xc0],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2116,7 +2197,7 @@ class Assembler {
                         opcode: 'XOR',
                         operands: ['AX', operands[1]],
                         machineCode: [0x35, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2126,7 +2207,7 @@ class Assembler {
                         opcode: 'XOR',
                         operands: ['CX', 'DX'],
                         machineCode: [0x31, 0xd1],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2137,7 +2218,7 @@ class Assembler {
                         opcode: 'XOR',
                         operands: ['CX', 'CX'],
                         machineCode: [0x31, 0xc9],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2148,7 +2229,7 @@ class Assembler {
                         opcode: 'XOR',
                         operands: ['DX', 'DX'],
                         machineCode: [0x31, 0xd2],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2159,7 +2240,7 @@ class Assembler {
                         opcode: 'XOR',
                         operands: ['BX', 'BX'],
                         machineCode: [0x31, 0xdb],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2176,7 +2257,7 @@ class Assembler {
                         opcode: 'XOR',
                         operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
                         machineCode: [0x31, modRM],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2189,7 +2270,7 @@ class Assembler {
                         opcode: 'ADC',
                         operands: ['AL', operands[1]],
                         machineCode: [0x14, imm8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2200,7 +2281,7 @@ class Assembler {
                         opcode: 'ADC',
                         operands: ['AX', operands[1]],
                         machineCode: [0x15, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2213,7 +2294,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['AX', 'BX'],
                         machineCode: [0x8b, 0xc3],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2224,7 +2305,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['BX', 'AX'],
                         machineCode: [0x89, 0xc3],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2244,7 +2325,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
                         machineCode: [0x89, modRM],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2263,7 +2344,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
                         machineCode: [0x88, modRM],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2273,7 +2354,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['CX', 'AX'],
                         machineCode: [0x8b, 0xc8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2283,7 +2364,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['DX', 'BX'],
                         machineCode: [0x8b, 0xda],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2294,7 +2375,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['AX', 'CX'],
                         machineCode: [0x8b, 0xc1],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2305,7 +2386,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['BX', 'CX'],
                         machineCode: [0x89, 0xcb],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2316,7 +2397,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['CX', '[BX]'],
                         machineCode: [0x8b, 0x0f],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2327,7 +2408,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['DX', '[BX]'],
                         machineCode: [0x8b, 0x17],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2338,7 +2419,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['DL', '[SI]'],
                         machineCode: [0x8a, 0x14],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2349,7 +2430,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['AL', '[SI]'],
                         machineCode: [0x8a, 0x04],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2359,7 +2440,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['[BX]', 'AX'],
                         machineCode: [0x89, 0x07],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2411,10 +2492,81 @@ class Assembler {
                     }
                 }
 
+                // 处理 MOV r8, label 格式，其中 label 是数据段中的变量
+                if (reg8Map.hasOwnProperty(operands[0]) && !memOp0 && !memOp1) {
+                    // 检查第二个操作数是否是数据段中的变量
+                    const op1Lower = operands[1].toLowerCase();
+                    let labelDataVar = null;
+                    for (const dataVar of this.dataVariables) {
+                        if (dataVar.toLowerCase() === op1Lower) {
+                            labelDataVar = dataVar;
+                            break;
+                        }
+                    }
+                    if (labelDataVar) {
+                        // 查找标签地址
+                        let labelOffset = null;
+                        for (const key in this.symbols) {
+                            if (key.toLowerCase() === op1Lower) {
+                                labelOffset = this.symbols[key];
+                                break;
+                            }
+                        }
+                        if (labelOffset !== null) {
+                            // MOV r8, [disp16] - 8A 0E disp16 (小端序)
+                            const reg = reg8Map[operands[0]];
+                            const modRM = (0 << 6) | (reg << 3) | 6; // mod=00, reg=寄存器, rm=110 (直接寻址)
+                            return {
+                                address,
+                                opcode: 'MOV',
+                                operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                                machineCode: [0x8a, modRM, labelOffset & 0xff, (labelOffset >> 8) & 0xff],
+                                length: 4,
+                                originalLine: originalLine.trim()
+                            };
+                        }
+                    }
+                }
+
+                // 处理 MOV r16, label 格式，其中 label 是数据段中的变量
+                const reg16Map = { 'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3, 'sp': 4, 'bp': 5, 'si': 6, 'di': 7 };
+                if (reg16Map.hasOwnProperty(operands[0]) && !memOp0 && !memOp1) {
+                    // 检查第二个操作数是否是数据段中的变量
+                    const op1Lower = operands[1].toLowerCase();
+                    let labelDataVar = null;
+                    for (const dataVar of this.dataVariables) {
+                        if (dataVar.toLowerCase() === op1Lower) {
+                            labelDataVar = dataVar;
+                            break;
+                        }
+                    }
+                    if (labelDataVar) {
+                        // 查找标签地址
+                        let labelOffset = null;
+                        for (const key in this.symbols) {
+                            if (key.toLowerCase() === op1Lower) {
+                                labelOffset = this.symbols[key];
+                                break;
+                            }
+                        }
+                        if (labelOffset !== null) {
+                            // MOV r16, [disp16] - 8B 0E disp16 (小端序)
+                            const reg = reg16Map[operands[0]];
+                            const modRM = (0 << 6) | (reg << 3) | 6; // mod=00, reg=寄存器, rm=110 (直接寻址)
+                            return {
+                                address,
+                                opcode: 'MOV',
+                                operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                                machineCode: [0x8b, modRM, labelOffset & 0xff, (labelOffset >> 8) & 0xff],
+                                length: 4,
+                                originalLine: originalLine.trim()
+                            };
+                        }
+                        }
+                }
+
                 // 内存到16位寄存器: MOV reg16, [mem]
                 if (memOp1 && !memOp0) {
-                    const reg16Map = { 'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3, 'sp': 4, 'bp': 5, 'si': 6, 'di': 7 };
-                    const reg8Map = { 'al': 0, 'cl': 1, 'dl': 2, 'bl': 3, 'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7 };
 
                     if (reg16Map.hasOwnProperty(operands[0])) {
                         // MOV r16, [mem] - 操作码8B
@@ -2509,7 +2661,7 @@ class Assembler {
                             opcode: 'MOV',
                             operands: ['CX', operands[1].toUpperCase()],
                             machineCode: [0x8b, 0x0e, offset & 0xff, (offset >> 8) & 0xff],
-                            length: 4,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -2533,7 +2685,7 @@ class Assembler {
                             opcode: 'MOV',
                             operands: [operands[0].toUpperCase(), 'AL'],
                             machineCode: [0x88, 0x06, offset & 0xff, (offset >> 8) & 0xff],
-                            length: 4,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -2547,7 +2699,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['AX', originalOperands[1]],
                         machineCode: [0xb8, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2558,7 +2710,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['AX', 'CS'],
                         machineCode: [0x8c, 0xc8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2568,7 +2720,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['AX', 'DS'],
                         machineCode: [0x8c, 0xd8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2578,7 +2730,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['AX', 'SS'],
                         machineCode: [0x8c, 0xe0],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2588,7 +2740,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['AX', 'ES'],
                         machineCode: [0x8c, 0xe8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2599,7 +2751,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['DS', 'AX'],
                         machineCode: [0x8e, 0xd8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2609,7 +2761,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['ES', 'AX'],
                         machineCode: [0x8e, 0xc0],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2619,7 +2771,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['SS', 'AX'],
                         machineCode: [0x8e, 0xd0],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2629,7 +2781,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['CS', 'AX'],
                         machineCode: [0x8e, 0xc8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2653,7 +2805,7 @@ class Assembler {
                                 opcode: 'MOV',
                                 operands: [label, operands[1].toUpperCase()],
                                 machineCode: [0x89, modRM, offset & 0xff, (offset >> 8) & 0xff],
-                                length: 4,
+                                length,
                                 originalLine: originalLine.trim()
                             };
                         }
@@ -2676,7 +2828,7 @@ class Assembler {
                                 opcode: 'MOV',
                                 operands: [label, operands[1].toUpperCase()],
                                 machineCode: [0x89, modRM, offset & 0xff, (offset >> 8) & 0xff],
-                                length: 4,
+                                length,
                                 originalLine: originalLine.trim()
                             };
                         }
@@ -2689,7 +2841,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['BX', originalOperands[1]],
                         machineCode: [0xbb, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2700,7 +2852,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['CX', originalOperands[1]],
                         machineCode: [0xb9, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2711,7 +2863,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['DX', originalOperands[1]],
                         machineCode: [0xba, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2722,7 +2874,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['SI', originalOperands[1]],
                         machineCode: [0xbe, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2733,7 +2885,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['DI', originalOperands[1]],
                         machineCode: [0xbf, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2744,7 +2896,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['BP', originalOperands[1]],
                         machineCode: [0xbd, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2755,7 +2907,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['SP', originalOperands[1]],
                         machineCode: [0xbc, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2767,7 +2919,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['AL', originalOperands[1]],
                         machineCode: [0xb0, imm8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2778,7 +2930,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['AH', originalOperands[1]],
                         machineCode: [0xb4, imm8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2789,7 +2941,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['BL', originalOperands[1]],
                         machineCode: [0xb3, imm8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2800,7 +2952,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['BH', originalOperands[1]],
                         machineCode: [0xb7, imm8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2811,7 +2963,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['CL', originalOperands[1]],
                         machineCode: [0xb1, imm8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2822,7 +2974,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['CH', originalOperands[1]],
                         machineCode: [0xb5, imm8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2833,7 +2985,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['DL', originalOperands[1]],
                         machineCode: [0xb2, imm8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2844,7 +2996,7 @@ class Assembler {
                         opcode: 'MOV',
                         operands: ['DH', originalOperands[1]],
                         machineCode: [0xb6, imm8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -2916,7 +3068,7 @@ class Assembler {
                                                 opcode: 'MOV',
                                                 operands: [originalOperands[0], operands[1]],
                                                 machineCode: [0xc6, modRM, labelOffset & 0xff, imm16 & 0xff],
-                                                length: 4,
+                                                length,
                                                 originalLine: originalLine.trim()
                                             };
                                         } else {
@@ -2927,7 +3079,7 @@ class Assembler {
                                                 opcode: 'MOV',
                                                 operands: [originalOperands[0], operands[1]],
                                                 machineCode: [0xc6, modRM, labelOffset & 0xff, (labelOffset >> 8) & 0xff, imm16 & 0xff],
-                                                length: 5,
+                                                length,
                                                 originalLine: originalLine.trim()
                                             };
                                         }
@@ -2940,7 +3092,7 @@ class Assembler {
                                                 opcode: 'MOV',
                                                 operands: [originalOperands[0], operands[1]],
                                                 machineCode: [0xc7, modRM, labelOffset & 0xff, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                                                length: 5,
+                                                length,
                                                 originalLine: originalLine.trim()
                                             };
                                         } else {
@@ -2951,7 +3103,7 @@ class Assembler {
                                                 opcode: 'MOV',
                                                 operands: [originalOperands[0], operands[1]],
                                                 machineCode: [0xc7, modRM, labelOffset & 0xff, (labelOffset >> 8) & 0xff, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                                                length: 6,
+                                                length,
                                                 originalLine: originalLine.trim()
                                             };
                                         }
@@ -2988,7 +3140,7 @@ class Assembler {
                                 opcode: 'MOV',
                                 operands: [originalOperands[0], operands[1]],
                                 machineCode: [0xc6, 0x06, offset & 0xff, (offset >> 8) & 0xff, imm16 & 0xff],
-                                length: 5,
+                                length,
                                 originalLine: originalLine.trim()
                             };
                         } else {
@@ -2998,7 +3150,7 @@ class Assembler {
                                 opcode: 'MOV',
                                 operands: [originalOperands[0], operands[1]],
                                 machineCode: [0xc7, 0x06, offset & 0xff, (offset >> 8) & 0xff, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                                length: 6,
+                                length,
                                 originalLine: originalLine.trim()
                             };
                         }
@@ -3033,7 +3185,7 @@ class Assembler {
                                     opcode: 'MOV',
                                     operands: [operands[0].toUpperCase(), operands[1]],
                                     machineCode: [0xc6, modRM, imm16 & 0xff],
-                                    length: 3,
+                                    length,
                                     originalLine: originalLine.trim()
                                 };
                             } else {
@@ -3044,7 +3196,7 @@ class Assembler {
                                     opcode: 'MOV',
                                     operands: [operands[0].toUpperCase(), operands[1]],
                                     machineCode: [0xc7, modRM, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                                    length: 4,
+                                    length,
                                     originalLine: originalLine.trim()
                                 };
                             }
@@ -3060,7 +3212,7 @@ class Assembler {
                         opcode: 'RET',
                         operands: [],
                         machineCode: [0xc3],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 } else if (operands.length === 1 && this.isImmediate(operands[0])) {
@@ -3071,7 +3223,7 @@ class Assembler {
                         opcode: 'RET',
                         operands: [operands[0]],
                         machineCode: [0xc2, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3099,7 +3251,7 @@ class Assembler {
                             opcode: 'SHL',
                             operands: [operands[0].toUpperCase(), '1'],
                             machineCode: [info.opcode, info.modrm],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -3128,7 +3280,7 @@ class Assembler {
                             opcode: 'SHR',
                             operands: [operands[0].toUpperCase(), '1'],
                             machineCode: [info.opcode, info.modrm],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -3153,7 +3305,7 @@ class Assembler {
                             opcode: 'SHR',
                             operands: [operands[0].toUpperCase(), 'CL'],
                             machineCode: [0xd2, modRM],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     } else if (reg16Map.hasOwnProperty(operands[0])) {
@@ -3165,7 +3317,7 @@ class Assembler {
                             opcode: 'SHR',
                             operands: [operands[0].toUpperCase(), 'CL'],
                             machineCode: [0xd3, modRM],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -3178,7 +3330,7 @@ class Assembler {
                         opcode: 'PUSH',
                         operands: ['AX'],
                         machineCode: [0x50],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 } else if (operands[0] === 'bx') {
@@ -3187,7 +3339,7 @@ class Assembler {
                         opcode: 'PUSH',
                         operands: ['BX'],
                         machineCode: [0x53],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 } else if (operands[0] === 'cx') {
@@ -3196,7 +3348,7 @@ class Assembler {
                         opcode: 'PUSH',
                         operands: ['CX'],
                         machineCode: [0x51],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 } else if (operands[0] === 'dx') {
@@ -3205,7 +3357,7 @@ class Assembler {
                         opcode: 'PUSH',
                         operands: ['DX'],
                         machineCode: [0x52],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 } else if (operands[0] === 'si') {
@@ -3214,7 +3366,7 @@ class Assembler {
                         opcode: 'PUSH',
                         operands: ['SI'],
                         machineCode: [0x56],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 } else if (operands[0] === 'di') {
@@ -3223,7 +3375,7 @@ class Assembler {
                         opcode: 'PUSH',
                         operands: ['DI'],
                         machineCode: [0x57],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3235,7 +3387,7 @@ class Assembler {
                         opcode: 'POP',
                         operands: ['AX'],
                         machineCode: [0x58],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 } else if (operands[0] === 'bx') {
@@ -3244,7 +3396,7 @@ class Assembler {
                         opcode: 'POP',
                         operands: ['BX'],
                         machineCode: [0x5b],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 } else if (operands[0] === 'cx') {
@@ -3253,7 +3405,7 @@ class Assembler {
                         opcode: 'POP',
                         operands: ['CX'],
                         machineCode: [0x59],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 } else if (operands[0] === 'dx') {
@@ -3262,7 +3414,7 @@ class Assembler {
                         opcode: 'POP',
                         operands: ['DX'],
                         machineCode: [0x5a],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 } else if (operands[0] === 'si') {
@@ -3271,7 +3423,7 @@ class Assembler {
                         opcode: 'POP',
                         operands: ['SI'],
                         machineCode: [0x5e],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 } else if (operands[0] === 'di') {
@@ -3280,7 +3432,7 @@ class Assembler {
                         opcode: 'POP',
                         operands: ['DI'],
                         machineCode: [0x5f],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3300,7 +3452,7 @@ class Assembler {
                             opcode: 'CMP',
                             operands: ['AL', operands[1]],
                             machineCode: [0x3c, imm8],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     } else {
@@ -3312,7 +3464,7 @@ class Assembler {
                             opcode: 'CMP',
                             operands: [operands[0].toUpperCase(), operands[1]],
                             machineCode: [0x80, modRM, imm8],
-                            length: 3,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -3325,7 +3477,7 @@ class Assembler {
                         opcode: 'CMP',
                         operands: ['AX', operands[1]],
                         machineCode: [0x3d, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3341,7 +3493,7 @@ class Assembler {
                         opcode: 'CMP',
                         operands: [operands[0].toUpperCase(), operands[1]],
                         machineCode: [0x81, cmpRegMap[operands[0]], imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 4,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3352,7 +3504,7 @@ class Assembler {
                         opcode: 'CMP',
                         operands: ['AX', 'BX'],
                         machineCode: [0x39, 0xc3],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3369,7 +3521,7 @@ class Assembler {
                         opcode: 'CMP',
                         operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
                         machineCode: [0x39, modRM],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3386,7 +3538,7 @@ class Assembler {
                         opcode: 'CMP',
                         operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
                         machineCode: [0x3a, modRM],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3402,7 +3554,7 @@ class Assembler {
                         opcode: 'CALL',
                         operands: [operands[0]],
                         machineCode: [0xe8, offset16 & 0xff, (offset16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: 'CALL'
                     };
                 }
@@ -3415,7 +3567,7 @@ class Assembler {
                         opcode: 'CALL',
                         operands: ['FAR', operands[1]],
                         machineCode: [0x9a, targetAddress & 0xff, (targetAddress >> 8) & 0xff, 0x00, 0x00], // 简化处理，段地址设为0
-                        length: 5,
+                        length,
                         originalLine: 'CALL FAR'
                     };
                 }
@@ -3431,7 +3583,7 @@ class Assembler {
                         opcode: 'JMP',
                         operands: [operands[0]],
                         machineCode: [0xe9, offset16 & 0xff, (offset16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: 'JMP'
                     };
                 }
@@ -3446,7 +3598,7 @@ class Assembler {
                         opcode: 'JMP',
                         operands: ['SHORT', operands[1]],
                         machineCode: [0xeb, offset8],
-                        length: 2,
+                        length,
                         originalLine: 'JMP SHORT'
                     };
                 }
@@ -3459,7 +3611,7 @@ class Assembler {
                         opcode: 'JMP',
                         operands: ['FAR', operands[1]],
                         machineCode: [0xea, targetAddress & 0xff, (targetAddress >> 8) & 0xff, 0x00, 0x00], // 简化处理，段地址设为0
-                        length: 5,
+                        length,
                         originalLine: 'JMP FAR'
                     };
                 }
@@ -3477,7 +3629,7 @@ class Assembler {
                         opcode: opcode === 'jz' ? 'JZ' : 'JE',
                         operands: [operands[0]],
                         machineCode: [0x74, offset8],
-                        length: 2,
+                        length,
                         originalLine: opcode === 'jz' ? 'JZ' : 'JE'
                     };
                 }
@@ -3495,7 +3647,7 @@ class Assembler {
                         opcode: opcode === 'jnz' ? 'JNZ' : 'JNE',
                         operands: [operands[0]],
                         machineCode: [0x75, offset8],
-                        length: 2,
+                        length,
                         originalLine: opcode === 'jnz' ? 'JNZ' : 'JNE'
                     };
                 }
@@ -3516,7 +3668,7 @@ class Assembler {
                         opcode: 'SBB',
                         operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
                         machineCode: [0x19, modRM],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3527,7 +3679,7 @@ class Assembler {
                         opcode: 'SBB',
                         operands: ['AL', operands[1]],
                         machineCode: [0x1c, imm8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3538,7 +3690,7 @@ class Assembler {
                         opcode: 'SBB',
                         operands: ['AX', operands[1]],
                         machineCode: [0x1d, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3550,7 +3702,7 @@ class Assembler {
                         opcode: 'NEG',
                         operands: ['AL'],
                         machineCode: [0xf6, 0xd8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3560,7 +3712,7 @@ class Assembler {
                         opcode: 'NEG',
                         operands: ['AX'],
                         machineCode: [0xf7, 0xd8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3570,7 +3722,7 @@ class Assembler {
                         opcode: 'NEG',
                         operands: ['BL'],
                         machineCode: [0xf6, 0xdb],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3580,7 +3732,7 @@ class Assembler {
                         opcode: 'NEG',
                         operands: ['BX'],
                         machineCode: [0xf7, 0xdb],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3590,7 +3742,7 @@ class Assembler {
                         opcode: 'NEG',
                         operands: ['CL'],
                         machineCode: [0xf6, 0xd9],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3600,7 +3752,7 @@ class Assembler {
                         opcode: 'NEG',
                         operands: ['CX'],
                         machineCode: [0xf7, 0xd9],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3610,7 +3762,7 @@ class Assembler {
                         opcode: 'NEG',
                         operands: ['DL'],
                         machineCode: [0xf6, 0xda],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3620,7 +3772,7 @@ class Assembler {
                         opcode: 'NEG',
                         operands: ['DX'],
                         machineCode: [0xf7, 0xda],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3632,7 +3784,7 @@ class Assembler {
                         opcode: 'NOT',
                         operands: ['AL'],
                         machineCode: [0xf6, 0xd0],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3642,7 +3794,7 @@ class Assembler {
                         opcode: 'NOT',
                         operands: ['AX'],
                         machineCode: [0xf7, 0xd0],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3652,7 +3804,7 @@ class Assembler {
                         opcode: 'NOT',
                         operands: ['BL'],
                         machineCode: [0xf6, 0xd3],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3662,7 +3814,7 @@ class Assembler {
                         opcode: 'NOT',
                         operands: ['BX'],
                         machineCode: [0xf7, 0xd3],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3672,7 +3824,7 @@ class Assembler {
                         opcode: 'NOT',
                         operands: ['CL'],
                         machineCode: [0xf6, 0xd1],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3682,7 +3834,7 @@ class Assembler {
                         opcode: 'NOT',
                         operands: ['CX'],
                         machineCode: [0xf7, 0xd1],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3692,7 +3844,7 @@ class Assembler {
                         opcode: 'NOT',
                         operands: ['DL'],
                         machineCode: [0xf6, 0xd2],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3702,7 +3854,7 @@ class Assembler {
                         opcode: 'NOT',
                         operands: ['DX'],
                         machineCode: [0xf7, 0xd2],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3714,7 +3866,7 @@ class Assembler {
                         opcode: 'INC',
                         operands: ['AL'],
                         machineCode: [0xfe, 0xc0],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3724,7 +3876,7 @@ class Assembler {
                         opcode: 'INC',
                         operands: ['AX'],
                         machineCode: [0x40],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3734,7 +3886,7 @@ class Assembler {
                         opcode: 'INC',
                         operands: ['BL'],
                         machineCode: [0xfe, 0xc3],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3744,7 +3896,7 @@ class Assembler {
                         opcode: 'INC',
                         operands: ['BX'],
                         machineCode: [0x43],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3754,7 +3906,7 @@ class Assembler {
                         opcode: 'INC',
                         operands: ['CL'],
                         machineCode: [0xfe, 0xc1],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3764,7 +3916,7 @@ class Assembler {
                         opcode: 'INC',
                         operands: ['CX'],
                         machineCode: [0x41],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3774,7 +3926,7 @@ class Assembler {
                         opcode: 'INC',
                         operands: ['DL'],
                         machineCode: [0xfe, 0xc2],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3784,7 +3936,7 @@ class Assembler {
                         opcode: 'INC',
                         operands: ['DX'],
                         machineCode: [0x42],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3795,7 +3947,7 @@ class Assembler {
                         opcode: 'INC',
                         operands: ['SI'],
                         machineCode: [0x46],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3805,7 +3957,7 @@ class Assembler {
                         opcode: 'INC',
                         operands: ['DI'],
                         machineCode: [0x47],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3815,7 +3967,7 @@ class Assembler {
                         opcode: 'INC',
                         operands: ['BP'],
                         machineCode: [0x45],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3825,7 +3977,7 @@ class Assembler {
                         opcode: 'INC',
                         operands: ['SP'],
                         machineCode: [0x44],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3837,7 +3989,7 @@ class Assembler {
                         opcode: 'DEC',
                         operands: ['AL'],
                         machineCode: [0xfe, 0xc8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3847,7 +3999,7 @@ class Assembler {
                         opcode: 'DEC',
                         operands: ['AX'],
                         machineCode: [0x48],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3857,7 +4009,7 @@ class Assembler {
                         opcode: 'DEC',
                         operands: ['BL'],
                         machineCode: [0xfe, 0xcb],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3867,7 +4019,7 @@ class Assembler {
                         opcode: 'DEC',
                         operands: ['BX'],
                         machineCode: [0x4b],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3877,7 +4029,7 @@ class Assembler {
                         opcode: 'DEC',
                         operands: ['CL'],
                         machineCode: [0xfe, 0xc9],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3887,7 +4039,7 @@ class Assembler {
                         opcode: 'DEC',
                         operands: ['CX'],
                         machineCode: [0x49],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3897,7 +4049,7 @@ class Assembler {
                         opcode: 'DEC',
                         operands: ['DL'],
                         machineCode: [0xfe, 0xca],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3907,7 +4059,7 @@ class Assembler {
                         opcode: 'DEC',
                         operands: ['DX'],
                         machineCode: [0x4a],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3918,7 +4070,7 @@ class Assembler {
                         opcode: 'DEC',
                         operands: ['SI'],
                         machineCode: [0x4e],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3928,7 +4080,7 @@ class Assembler {
                         opcode: 'DEC',
                         operands: ['DI'],
                         machineCode: [0x4f],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3938,7 +4090,7 @@ class Assembler {
                         opcode: 'DEC',
                         operands: ['BP'],
                         machineCode: [0x4d],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3948,7 +4100,7 @@ class Assembler {
                         opcode: 'DEC',
                         operands: ['SP'],
                         machineCode: [0x4c],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3961,7 +4113,7 @@ class Assembler {
                         opcode: 'TEST',
                         operands: ['AL', operands[1]],
                         machineCode: [0xa8, imm8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3972,7 +4124,7 @@ class Assembler {
                         opcode: 'TEST',
                         operands: ['AX', operands[1]],
                         machineCode: [0xa9, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3984,7 +4136,7 @@ class Assembler {
                         opcode: 'MUL',
                         operands: ['BL'],
                         machineCode: [0xf6, 0xe3],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -3994,7 +4146,7 @@ class Assembler {
                         opcode: 'MUL',
                         operands: ['BX'],
                         machineCode: [0xf7, 0xe3],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4004,7 +4156,7 @@ class Assembler {
                         opcode: 'MUL',
                         operands: ['CL'],
                         machineCode: [0xf6, 0xe1],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4014,7 +4166,7 @@ class Assembler {
                         opcode: 'MUL',
                         operands: ['CX'],
                         machineCode: [0xf7, 0xe1],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4024,7 +4176,7 @@ class Assembler {
                         opcode: 'MUL',
                         operands: ['DL'],
                         machineCode: [0xf6, 0xe2],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4034,7 +4186,7 @@ class Assembler {
                         opcode: 'MUL',
                         operands: ['DX'],
                         machineCode: [0xf7, 0xe2],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4044,7 +4196,7 @@ class Assembler {
                         opcode: 'MUL',
                         operands: ['AH'],
                         machineCode: [0xf6, 0xe4],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4054,7 +4206,7 @@ class Assembler {
                         opcode: 'MUL',
                         operands: ['CH'],
                         machineCode: [0xf6, 0xe5],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4064,7 +4216,7 @@ class Assembler {
                         opcode: 'MUL',
                         operands: ['DH'],
                         machineCode: [0xf6, 0xe6],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4074,7 +4226,7 @@ class Assembler {
                         opcode: 'MUL',
                         operands: ['BH'],
                         machineCode: [0xf6, 0xe7],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4086,7 +4238,7 @@ class Assembler {
                         opcode: 'IMUL',
                         operands: ['BL'],
                         machineCode: [0xf6, 0xeb],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4096,7 +4248,7 @@ class Assembler {
                         opcode: 'IMUL',
                         operands: ['BX'],
                         machineCode: [0xf7, 0xeb],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4106,7 +4258,7 @@ class Assembler {
                         opcode: 'IMUL',
                         operands: ['CL'],
                         machineCode: [0xf6, 0xe9],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4116,7 +4268,7 @@ class Assembler {
                         opcode: 'IMUL',
                         operands: ['CX'],
                         machineCode: [0xf7, 0xe9],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4126,7 +4278,7 @@ class Assembler {
                         opcode: 'IMUL',
                         operands: ['DL'],
                         machineCode: [0xf6, 0xea],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4136,7 +4288,7 @@ class Assembler {
                         opcode: 'IMUL',
                         operands: ['DX'],
                         machineCode: [0xf7, 0xea],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4148,7 +4300,7 @@ class Assembler {
                         opcode: 'DIV',
                         operands: ['BL'],
                         machineCode: [0xf6, 0xf3],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4158,7 +4310,7 @@ class Assembler {
                         opcode: 'DIV',
                         operands: ['BX'],
                         machineCode: [0xf7, 0xf3],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4168,7 +4320,7 @@ class Assembler {
                         opcode: 'DIV',
                         operands: ['CL'],
                         machineCode: [0xf6, 0xf1],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4178,7 +4330,7 @@ class Assembler {
                         opcode: 'DIV',
                         operands: ['CX'],
                         machineCode: [0xf7, 0xf1],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4188,7 +4340,7 @@ class Assembler {
                         opcode: 'DIV',
                         operands: ['DL'],
                         machineCode: [0xf6, 0xf2],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4198,7 +4350,7 @@ class Assembler {
                         opcode: 'DIV',
                         operands: ['DX'],
                         machineCode: [0xf7, 0xf2],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4210,7 +4362,7 @@ class Assembler {
                         opcode: 'IDIV',
                         operands: ['BL'],
                         machineCode: [0xf6, 0xfb],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4220,7 +4372,7 @@ class Assembler {
                         opcode: 'IDIV',
                         operands: ['BX'],
                         machineCode: [0xf7, 0xfb],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4230,7 +4382,7 @@ class Assembler {
                         opcode: 'IDIV',
                         operands: ['CL'],
                         machineCode: [0xf6, 0xf9],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4240,7 +4392,7 @@ class Assembler {
                         opcode: 'IDIV',
                         operands: ['CX'],
                         machineCode: [0xf7, 0xf9],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4250,7 +4402,7 @@ class Assembler {
                         opcode: 'IDIV',
                         operands: ['DL'],
                         machineCode: [0xf6, 0xfa],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4260,7 +4412,7 @@ class Assembler {
                         opcode: 'IDIV',
                         operands: ['DX'],
                         machineCode: [0xf7, 0xfa],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4271,7 +4423,7 @@ class Assembler {
                     opcode: 'AAA',
                     operands: [],
                     machineCode: [0x37],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'aas':
@@ -4280,7 +4432,7 @@ class Assembler {
                     opcode: 'AAS',
                     operands: [],
                     machineCode: [0x3f],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'daa':
@@ -4289,7 +4441,7 @@ class Assembler {
                     opcode: 'DAA',
                     operands: [],
                     machineCode: [0x27],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'das':
@@ -4298,7 +4450,7 @@ class Assembler {
                     opcode: 'DAS',
                     operands: [],
                     machineCode: [0x2f],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'aam':
@@ -4307,7 +4459,7 @@ class Assembler {
                     opcode: 'AAM',
                     operands: [],
                     machineCode: [0xd4, 0x0a],
-                    length: 2,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'aad':
@@ -4316,7 +4468,7 @@ class Assembler {
                     opcode: 'AAD',
                     operands: [],
                     machineCode: [0xd5, 0x0a],
-                    length: 2,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'rol':
@@ -4327,7 +4479,7 @@ class Assembler {
                             opcode: 'ROL',
                             operands: ['AL', '1'],
                             machineCode: [0xd0, 0xc0],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -4337,7 +4489,7 @@ class Assembler {
                             opcode: 'ROL',
                             operands: ['AX', '1'],
                             machineCode: [0xd1, 0xc0],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -4347,7 +4499,7 @@ class Assembler {
                             opcode: 'ROL',
                             operands: ['BL', '1'],
                             machineCode: [0xd0, 0xc3],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -4357,7 +4509,7 @@ class Assembler {
                             opcode: 'ROL',
                             operands: ['BX', '1'],
                             machineCode: [0xd1, 0xc3],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -4371,7 +4523,7 @@ class Assembler {
                             opcode: 'ROR',
                             operands: ['AL', '1'],
                             machineCode: [0xd0, 0xc8],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -4381,7 +4533,7 @@ class Assembler {
                             opcode: 'ROR',
                             operands: ['AX', '1'],
                             machineCode: [0xd1, 0xc8],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -4391,7 +4543,7 @@ class Assembler {
                             opcode: 'ROR',
                             operands: ['BL', '1'],
                             machineCode: [0xd0, 0xcb],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -4401,7 +4553,7 @@ class Assembler {
                             opcode: 'ROR',
                             operands: ['BX', '1'],
                             machineCode: [0xd1, 0xcb],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -4415,7 +4567,7 @@ class Assembler {
                             opcode: 'RCL',
                             operands: ['AL', '1'],
                             machineCode: [0xd0, 0xd0],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -4425,7 +4577,7 @@ class Assembler {
                             opcode: 'RCL',
                             operands: ['AX', '1'],
                             machineCode: [0xd1, 0xd0],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -4439,7 +4591,7 @@ class Assembler {
                             opcode: 'RCR',
                             operands: ['AL', '1'],
                             machineCode: [0xd0, 0xd8],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -4449,7 +4601,7 @@ class Assembler {
                             opcode: 'RCR',
                             operands: ['AX', '1'],
                             machineCode: [0xd1, 0xd8],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -4463,7 +4615,7 @@ class Assembler {
                             opcode: 'SAR',
                             operands: ['AL', '1'],
                             machineCode: [0xd0, 0xf8],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -4473,7 +4625,7 @@ class Assembler {
                             opcode: 'SAR',
                             operands: ['AX', '1'],
                             machineCode: [0xd1, 0xf8],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -4483,7 +4635,7 @@ class Assembler {
                             opcode: 'SAR',
                             operands: ['BX', '1'],
                             machineCode: [0xd1, 0xfb],
-                            length: 2,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -4496,7 +4648,7 @@ class Assembler {
                         opcode: 'XCHG',
                         operands: ['AX', 'BX'],
                         machineCode: [0x93],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4506,7 +4658,7 @@ class Assembler {
                         opcode: 'XCHG',
                         operands: ['BX', 'AX'],
                         machineCode: [0x93],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4516,7 +4668,7 @@ class Assembler {
                         opcode: 'XCHG',
                         operands: ['AX', 'CX'],
                         machineCode: [0x91],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4526,7 +4678,7 @@ class Assembler {
                         opcode: 'XCHG',
                         operands: ['CX', 'AX'],
                         machineCode: [0x91],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4536,7 +4688,7 @@ class Assembler {
                         opcode: 'XCHG',
                         operands: ['AX', 'DX'],
                         machineCode: [0x92],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4546,43 +4698,122 @@ class Assembler {
                         opcode: 'XCHG',
                         operands: ['DX', 'AX'],
                         machineCode: [0x92],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
-                // 通用寄存器-寄存器 XCHG (16位) - 使用 0x87 指令
-                const reg16MapXchg = { 'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3, 'sp': 4, 'bp': 5, 'si': 6, 'di': 7 };
-                if (reg16MapXchg.hasOwnProperty(operands[0]) && reg16MapXchg.hasOwnProperty(operands[1])) {
-                    const reg1 = reg16MapXchg[operands[0]];
-                    const reg2 = reg16MapXchg[operands[1]];
-                    // 0x87: XCHG r/m16, r16
-                    // ModR/M: mod=11(寄存器), reg=reg1, rm=reg2
-                    const modRM = (3 << 6) | (reg1 << 3) | reg2;
-                    return {
-                        address,
-                        opcode: 'XCHG',
-                        operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
-                        machineCode: [0x87, modRM],
-                        length: 2,
-                        originalLine: originalLine.trim()
-                    };
-                }
-                // 通用寄存器-寄存器 XCHG (8位) - 使用 0x86 指令
-                const reg8MapXchg = { 'al': 0, 'cl': 1, 'dl': 2, 'bl': 3, 'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7 };
-                if (reg8MapXchg.hasOwnProperty(operands[0]) && reg8MapXchg.hasOwnProperty(operands[1])) {
-                    const reg1 = reg8MapXchg[operands[0]];
-                    const reg2 = reg8MapXchg[operands[1]];
-                    // 0x86: XCHG r/m8, r8
-                    // ModR/M: mod=11(寄存器), reg=reg1, rm=reg2
-                    const modRM = (3 << 6) | (reg1 << 3) | reg2;
-                    return {
-                        address,
-                        opcode: 'XCHG',
-                        operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
-                        machineCode: [0x86, modRM],
-                        length: 2,
-                        originalLine: originalLine.trim()
-                    };
+                {
+                    const reg16MapXchg = { 'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3, 'sp': 4, 'bp': 5, 'si': 6, 'di': 7 };
+                    const reg8MapXchg = { 'al': 0, 'cl': 1, 'dl': 2, 'bl': 3, 'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7 };
+                    
+                    const memOp0 = this.parseMemoryOperand(operands[0]);
+                    const memOp1 = this.parseMemoryOperand(operands[1]);
+                    
+                    if (reg16MapXchg.hasOwnProperty(operands[0]) && memOp1 && !memOp1.isDirect) {
+                        const reg = reg16MapXchg[operands[0]];
+                        const modRM = (memOp1.mod << 6) | (reg << 3) | memOp1.rm;
+                        const machineCode = [0x87, modRM];
+                        if (memOp1.dispSize === 1) {
+                            machineCode.push(memOp1.disp & 0xFF);
+                        }
+                        return {
+                            address,
+                            opcode: 'XCHG',
+                            operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                            machineCode,
+                            length: machineCode.length,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                    
+                    if (memOp0 && !memOp0.isDirect && reg16MapXchg.hasOwnProperty(operands[1])) {
+                        const reg = reg16MapXchg[operands[1]];
+                        const modRM = (memOp0.mod << 6) | (reg << 3) | memOp0.rm;
+                        const machineCode = [0x87, modRM];
+                        if (memOp0.dispSize === 1) {
+                            machineCode.push(memOp0.disp & 0xFF);
+                        }
+                        return {
+                            address,
+                            opcode: 'XCHG',
+                            operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                            machineCode,
+                            length: machineCode.length,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                    
+                    if (reg16MapXchg.hasOwnProperty(operands[0]) && memOp1 && memOp1.isDirect) {
+                        const reg = reg16MapXchg[operands[0]];
+                        const modRM = (0 << 6) | (reg << 3) | 6;
+                        const machineCode = [0x87, modRM];
+                        if (memOp1.hasLabel) {
+                            const labelAddr = this.labels[memOp1.labelName] !== undefined ? this.labels[memOp1.labelName] : 0;
+                            machineCode.push((labelAddr + memOp1.disp) & 0xFF);
+                            machineCode.push(((labelAddr + memOp1.disp) >> 8) & 0xFF);
+                        } else {
+                            machineCode.push(memOp1.disp & 0xFF);
+                            machineCode.push((memOp1.disp >> 8) & 0xFF);
+                        }
+                        return {
+                            address,
+                            opcode: 'XCHG',
+                            operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                            machineCode,
+                            length: 4,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                    
+                    if (memOp0 && memOp0.isDirect && reg16MapXchg.hasOwnProperty(operands[1])) {
+                        const reg = reg16MapXchg[operands[1]];
+                        const modRM = (0 << 6) | (reg << 3) | 6;
+                        const machineCode = [0x87, modRM];
+                        if (memOp0.hasLabel) {
+                            const labelAddr = this.labels[memOp0.labelName] !== undefined ? this.labels[memOp0.labelName] : 0;
+                            machineCode.push((labelAddr + memOp0.disp) & 0xFF);
+                            machineCode.push(((labelAddr + memOp0.disp) >> 8) & 0xFF);
+                        } else {
+                            machineCode.push(memOp0.disp & 0xFF);
+                            machineCode.push((memOp0.disp >> 8) & 0xFF);
+                        }
+                        return {
+                            address,
+                            opcode: 'XCHG',
+                            operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                            machineCode,
+                            length: 4,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                    
+                    if (reg16MapXchg.hasOwnProperty(operands[0]) && reg16MapXchg.hasOwnProperty(operands[1])) {
+                        const reg1 = reg16MapXchg[operands[0]];
+                        const reg2 = reg16MapXchg[operands[1]];
+                        const modRM = (3 << 6) | (reg1 << 3) | reg2;
+                        return {
+                            address,
+                            opcode: 'XCHG',
+                            operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                            machineCode: [0x87, modRM],
+                            length,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                    
+                    if (reg8MapXchg.hasOwnProperty(operands[0]) && reg8MapXchg.hasOwnProperty(operands[1])) {
+                        const reg1 = reg8MapXchg[operands[0]];
+                        const reg2 = reg8MapXchg[operands[1]];
+                        const modRM = (3 << 6) | (reg1 << 3) | reg2;
+                        return {
+                            address,
+                            opcode: 'XCHG',
+                            operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                            machineCode: [0x86, modRM],
+                            length,
+                            originalLine: originalLine.trim()
+                        };
+                    }
                 }
                 break;
             case 'stc':
@@ -4591,7 +4822,7 @@ class Assembler {
                     opcode: 'STC',
                     operands: [],
                     machineCode: [0xf9],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'clc':
@@ -4600,7 +4831,7 @@ class Assembler {
                     opcode: 'CLC',
                     operands: [],
                     machineCode: [0xf8],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'cmc':
@@ -4609,7 +4840,7 @@ class Assembler {
                     opcode: 'CMC',
                     operands: [],
                     machineCode: [0xf5],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'std':
@@ -4618,7 +4849,7 @@ class Assembler {
                     opcode: 'STD',
                     operands: [],
                     machineCode: [0xfd],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'cld':
@@ -4627,7 +4858,7 @@ class Assembler {
                     opcode: 'CLD',
                     operands: [],
                     machineCode: [0xfc],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'sti':
@@ -4636,7 +4867,7 @@ class Assembler {
                     opcode: 'STI',
                     operands: [],
                     machineCode: [0xfb],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'cli':
@@ -4645,7 +4876,7 @@ class Assembler {
                     opcode: 'CLI',
                     operands: [],
                     machineCode: [0xfa],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'hlt':
@@ -4654,7 +4885,7 @@ class Assembler {
                     opcode: 'HLT',
                     operands: [],
                     machineCode: [0xf4],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'nop':
@@ -4663,7 +4894,7 @@ class Assembler {
                     opcode: 'NOP',
                     operands: [],
                     machineCode: [0x90],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'jnc':
@@ -4678,7 +4909,7 @@ class Assembler {
                         opcode: opcode === 'jnc' ? 'JNC' : (opcode === 'jnb' ? 'JNB' : 'JAE'),
                         operands: [operands[0]],
                         machineCode: [0x73, offset8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4693,7 +4924,7 @@ class Assembler {
                         opcode: 'JS',
                         operands: [operands[0]],
                         machineCode: [0x78, offset8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4708,7 +4939,7 @@ class Assembler {
                         opcode: 'JNS',
                         operands: [operands[0]],
                         machineCode: [0x79, offset8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4723,7 +4954,7 @@ class Assembler {
                         opcode: 'JO',
                         operands: [operands[0]],
                         machineCode: [0x70, offset8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4738,7 +4969,7 @@ class Assembler {
                         opcode: 'JNO',
                         operands: [operands[0]],
                         machineCode: [0x71, offset8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4754,7 +4985,7 @@ class Assembler {
                         opcode: opcode === 'jp' ? 'JP' : 'JPE',
                         operands: [operands[0]],
                         machineCode: [0x7a, offset8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4770,7 +5001,7 @@ class Assembler {
                         opcode: opcode === 'jnp' ? 'JNP' : 'JPO',
                         operands: [operands[0]],
                         machineCode: [0x7b, offset8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4786,7 +5017,7 @@ class Assembler {
                         opcode: opcode === 'jl' ? 'JL' : 'JNGE',
                         operands: [operands[0]],
                         machineCode: [0x7c, offset8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4802,7 +5033,7 @@ class Assembler {
                         opcode: opcode === 'jnl' ? 'JNL' : 'JGE',
                         operands: [operands[0]],
                         machineCode: [0x7d, offset8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4818,7 +5049,7 @@ class Assembler {
                         opcode: opcode === 'ja' ? 'JA' : 'JNBE',
                         operands: [operands[0]],
                         machineCode: [0x77, offset8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4834,7 +5065,7 @@ class Assembler {
                         opcode: opcode === 'jna' ? 'JNA' : 'JBE',
                         operands: [operands[0]],
                         machineCode: [0x76, offset8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4849,7 +5080,7 @@ class Assembler {
                         opcode: 'LOOP',
                         operands: [operands[0]],
                         machineCode: [0xe2, offset8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4865,7 +5096,7 @@ class Assembler {
                         opcode: opcode === 'loopz' ? 'LOOPZ' : 'LOOPE',
                         operands: [operands[0]],
                         machineCode: [0xe1, offset8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4881,7 +5112,7 @@ class Assembler {
                         opcode: opcode === 'loopnz' ? 'LOOPNZ' : 'LOOPNE',
                         operands: [operands[0]],
                         machineCode: [0xe0, offset8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4896,7 +5127,7 @@ class Assembler {
                         opcode: 'JCXZ',
                         operands: [operands[0]],
                         machineCode: [0xe3, offset8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4907,7 +5138,7 @@ class Assembler {
                     opcode: 'INTO',
                     operands: [],
                     machineCode: [0xce],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'iret':
@@ -4916,7 +5147,7 @@ class Assembler {
                     opcode: 'IRET',
                     operands: [],
                     machineCode: [0xcf],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'retf':
@@ -4927,7 +5158,7 @@ class Assembler {
                         opcode: 'RETF',
                         operands: [],
                         machineCode: [0xcb],
-                        length: 1,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 } else if (operands.length === 1 && this.isImmediate(operands[0])) {
@@ -4938,7 +5169,7 @@ class Assembler {
                         opcode: 'RETF',
                         operands: [operands[0]],
                         machineCode: [0xca, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                        length: 3,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -4949,7 +5180,7 @@ class Assembler {
                     opcode: 'PUSHF',
                     operands: [],
                     machineCode: [0x9c],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'popf':
@@ -4958,7 +5189,7 @@ class Assembler {
                     opcode: 'POPF',
                     operands: [],
                     machineCode: [0x9d],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'lds':
@@ -4980,7 +5211,7 @@ class Assembler {
                             opcode: 'LDS',
                             operands: [destReg.toUpperCase(), operands[1]],
                             machineCode: [0xc5, modRM, offset & 0xff, (offset >> 8) & 0xff],
-                            length: 4,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -5004,7 +5235,7 @@ class Assembler {
                             opcode: 'LES',
                             operands: [destReg.toUpperCase(), operands[1]],
                             machineCode: [0xc4, modRM, offset & 0xff, (offset >> 8) & 0xff],
-                            length: 4,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -5022,7 +5253,7 @@ class Assembler {
                                 opcode: 'IN',
                                 operands: ['AL', port],
                                 machineCode: [0xe4, portNum & 0xff],
-                                length: 2,
+                                length,
                                 originalLine: originalLine.trim()
                             };
                         }
@@ -5035,7 +5266,7 @@ class Assembler {
                                 opcode: 'IN',
                                 operands: ['AX', port],
                                 machineCode: [0xe5, portNum & 0xff],
-                                length: 2,
+                                length,
                                 originalLine: originalLine.trim()
                             };
                         }
@@ -5046,7 +5277,7 @@ class Assembler {
                             opcode: 'IN',
                             operands: ['AL', 'DX'],
                             machineCode: [0xec],
-                            length: 1,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -5056,7 +5287,7 @@ class Assembler {
                             opcode: 'IN',
                             operands: ['AX', 'DX'],
                             machineCode: [0xed],
-                            length: 1,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -5074,7 +5305,7 @@ class Assembler {
                                 opcode: 'OUT',
                                 operands: [port, 'AL'],
                                 machineCode: [0xe6, portNum & 0xff],
-                                length: 2,
+                                length,
                                 originalLine: originalLine.trim()
                             };
                         }
@@ -5087,7 +5318,7 @@ class Assembler {
                                 opcode: 'OUT',
                                 operands: [port, 'AX'],
                                 machineCode: [0xe7, portNum & 0xff],
-                                length: 2,
+                                length,
                                 originalLine: originalLine.trim()
                             };
                         }
@@ -5098,7 +5329,7 @@ class Assembler {
                             opcode: 'OUT',
                             operands: ['DX', 'AL'],
                             machineCode: [0xee],
-                            length: 1,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -5108,7 +5339,7 @@ class Assembler {
                             opcode: 'OUT',
                             operands: ['DX', 'AX'],
                             machineCode: [0xef],
-                            length: 1,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -5120,7 +5351,7 @@ class Assembler {
                     opcode: 'MOVSB',
                     operands: [],
                     machineCode: [0xa4],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'movsw':
@@ -5129,7 +5360,7 @@ class Assembler {
                     opcode: 'MOVSW',
                     operands: [],
                     machineCode: [0xa5],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'cmpsb':
@@ -5138,7 +5369,7 @@ class Assembler {
                     opcode: 'CMPSB',
                     operands: [],
                     machineCode: [0xa6],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'cmpsw':
@@ -5147,7 +5378,7 @@ class Assembler {
                     opcode: 'CMPSW',
                     operands: [],
                     machineCode: [0xa7],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'scasb':
@@ -5156,7 +5387,7 @@ class Assembler {
                     opcode: 'SCASB',
                     operands: [],
                     machineCode: [0xae],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'scasw':
@@ -5165,7 +5396,7 @@ class Assembler {
                     opcode: 'SCASW',
                     operands: [],
                     machineCode: [0xaf],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'lodsb':
@@ -5174,7 +5405,7 @@ class Assembler {
                     opcode: 'LODSB',
                     operands: [],
                     machineCode: [0xac],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'lodsw':
@@ -5183,7 +5414,7 @@ class Assembler {
                     opcode: 'LODSW',
                     operands: [],
                     machineCode: [0xad],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'stosb':
@@ -5192,7 +5423,7 @@ class Assembler {
                     opcode: 'STOSB',
                     operands: [],
                     machineCode: [0xaa],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'stosw':
@@ -5201,7 +5432,7 @@ class Assembler {
                     opcode: 'STOSW',
                     operands: [],
                     machineCode: [0xab],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'rep':
@@ -5225,7 +5456,7 @@ class Assembler {
                         opcode: 'REP',
                         operands: [stringOp.toUpperCase()],
                         machineCode: [0xf3, stringOpCode],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -5234,7 +5465,7 @@ class Assembler {
                     opcode: 'REP',
                     operands: [],
                     machineCode: [0xf3],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'repe':
@@ -5244,7 +5475,7 @@ class Assembler {
                     opcode: opcode === 'repz' ? 'REPZ' : 'REPE',
                     operands: [],
                     machineCode: [0xf3],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'repne':
@@ -5254,7 +5485,7 @@ class Assembler {
                     opcode: opcode === 'repnz' ? 'REPNZ' : 'REPNE',
                     operands: [],
                     machineCode: [0xf2],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'jg':
@@ -5268,7 +5499,7 @@ class Assembler {
                         opcode: opcode === 'jg' ? 'JG' : 'JNLE',
                         operands: [operands[0]],
                         machineCode: [0x7f, offset8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -5284,7 +5515,7 @@ class Assembler {
                         opcode: opcode === 'jng' ? 'JNG' : 'JLE',
                         operands: [operands[0]],
                         machineCode: [0x7e, offset8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -5301,7 +5532,7 @@ class Assembler {
                         opcode: opcode === 'jc' ? 'JC' : (opcode === 'jb' ? 'JB' : 'JNAE'),
                         operands: [operands[0]],
                         machineCode: [0x72, offset8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -5318,7 +5549,7 @@ class Assembler {
                         opcode: opcode === 'jnc' ? 'JNC' : (opcode === 'jnb' ? 'JNB' : 'JAE'),
                         operands: [operands[0]],
                         machineCode: [0x73, offset8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -5329,7 +5560,7 @@ class Assembler {
                     opcode: 'WAIT',
                     operands: [],
                     machineCode: [0x9b],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'esc':
@@ -5343,7 +5574,7 @@ class Assembler {
                         opcode: 'ESC',
                         operands: operands,
                         machineCode: [0xd8 | (escapeCode >> 3), modRM],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -5354,7 +5585,7 @@ class Assembler {
                     opcode: 'LOCK',
                     operands: [],
                     machineCode: [0xf0],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'xlat':
@@ -5363,7 +5594,7 @@ class Assembler {
                     opcode: 'XLAT',
                     operands: [],
                     machineCode: [0xd7],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'enter':
@@ -5375,7 +5606,7 @@ class Assembler {
                         opcode: 'ENTER',
                         operands: [imm16, nesting],
                         machineCode: [0xc8, imm16 & 0xff, (imm16 >> 8) & 0xff, nesting & 0xff],
-                        length: 4,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -5386,7 +5617,7 @@ class Assembler {
                     opcode: 'LEAVE',
                     operands: [],
                     machineCode: [0xc9],
-                    length: 1,
+                    length,
                     originalLine: originalLine.trim()
                 };
             case 'lea':
@@ -5444,7 +5675,7 @@ class Assembler {
                             opcode: 'LEA',
                             operands: [destReg.toUpperCase(), srcOperand],
                             machineCode: [0x8d, modRM, offset & 0xff, (offset >> 8) & 0xff],
-                            length: 4,
+                            length,
                             originalLine: originalLine.trim()
                         };
                     }
@@ -5458,7 +5689,7 @@ class Assembler {
                         opcode: 'INT',
                         operands: [operands[0]],
                         machineCode: [0xcd, imm8],
-                        length: 2,
+                        length,
                         originalLine: originalLine.trim()
                     };
                 }
@@ -5472,7 +5703,7 @@ class Assembler {
             opcode: 'UNKNOWN',
             operands: [],
             machineCode: [],
-            length: 1,
+            length,
             originalLine: originalLine.trim()
         };
     }
@@ -5535,6 +5766,13 @@ class Assembler {
         // 如果是内存引用（如 [bx]），返回 false
         if (value.startsWith('[') && value.endsWith(']')) {
             return false;
+        }
+        // 如果是数据段中的变量，返回 false（应该当作内存操作数）
+        const valueLower = value.toLowerCase();
+        for (const dataVar of this.dataVariables) {
+            if (dataVar.toLowerCase() === valueLower) {
+                return false;
+            }
         }
         // 否则是立即数
         return true;

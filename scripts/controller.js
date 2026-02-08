@@ -1098,9 +1098,22 @@ function updateInstructionsDisplay() {
 
     // 首先收集所有非数据定义的标签并按地址排序
     const codeLabels = [];
+    
+    // 收集所有EQU定义的标签名
+    const equLabels = new Set();
+    if (assembler.equDefinitions) {
+        assembler.equDefinitions.forEach(equDef => {
+            equLabels.add(equDef.label);
+        });
+    }
+    
     for (const label in assembler.symbols) {
         const symbolAddr = assembler.symbols[label];
-        // 检查是否为数字地址（排除EQU定义的常量）和是否在有效范围内，且不是数据定义
+        // 排除EQU定义的常量
+        if (equLabels.has(label)) {
+            continue;
+        }
+        // 检查是否为数字地址和是否在有效范围内，且不是数据定义
         if (typeof symbolAddr === 'number' && 
             !isNaN(symbolAddr) && 
             symbolAddr >= 0 && 
