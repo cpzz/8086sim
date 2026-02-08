@@ -439,6 +439,7 @@ class CPU8086 {
         const currentAddress = this.getMemoryAddress(this.getSegmentRegister('cs'), this.ip);
         const opcode = this.readMemory8(currentAddress);
 
+
         // 简单的指令解码和执行
         let instructionLength = 1;
 

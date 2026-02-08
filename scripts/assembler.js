@@ -2,6 +2,7 @@ class Assembler {
     constructor(memory) {
         this.memory = memory;
         this.symbols = {}; // 符号表，用于存储标签和地址
+        this.symbolOriginalCase = {}; // 符号表，用于存储标签的原始大小写形式
         this.instructions = []; // 解析后的指令列表
         this.dataSegments = []; // 数据段信息
         this.codePaddings = []; // 存放代码段的对齐填充（如 EVEN 插入的 NOP）
@@ -31,7 +32,7 @@ class Assembler {
             // end 伪指令（用于指定入口点）
             return 'other';
         }
-        
+
         // 检查是否是传统的8086汇编伪指令
         if (lowerLine.startsWith('assume ')) {
             return 'other';
@@ -48,7 +49,7 @@ class Assembler {
         } else if (lowerLine.endsWith(' ends')) {
             return 'other';
         }
-        
+
         // proc 和 endp 不在这里处理，在第一遍扫描的标签识别逻辑中处理
         return null;
     }
@@ -113,17 +114,18 @@ class Assembler {
         this.codeDataSegments = []; // 代码段中的数据定义
         this.equDefinitions = [];
         this.currentSegment = 'code'; // 默认在代码段
-        
+
         // 按行分割代码
         const lines = code.split('\n');
         let address = 0;
-        
+
         // 第一遍：收集标签
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
             if (line === '' || line.startsWith(';')) {
                 continue; // 跳过空行和注释
             }
+
 
             // 检查是否是段切换伪指令
             const directiveType = this.getDirectiveType(line);
@@ -146,7 +148,7 @@ class Assembler {
             // 检查是否是冒号标签（如 "label:"）
             if (line.endsWith(':')) {
                 const label = line.slice(0, -1).trim();
-                
+
                 // 检查标签后面是否有实际指令（"label: instruction" 格式）
                 let hasInstruction = false;
                 const colonIndex = line.indexOf(':');
@@ -156,13 +158,15 @@ class Assembler {
                         hasInstruction = true;
                     }
                 }
-                
+
                 if (!hasInstruction) {
                     // 纯标签行：暂时记录为"待确定"，使用特殊标记
                     this.symbols[label] = { type: 'forward', lineIndex: i, initialAddr: address };
+                    this.symbolOriginalCase[label.toLowerCase()] = label; // 保存原始大小写
                 } else {
                     // "label: instruction" 格式，标签指向当前指令
                     this.symbols[label] = address;
+                    this.symbolOriginalCase[label.toLowerCase()] = label; // 保存原始大小写
                 }
                 continue;
             }
@@ -207,6 +211,7 @@ class Assembler {
                 const potentialLabel = line.substring(0, dbIndex).trim();
                 if (potentialLabel && !potentialLabel.startsWith(';')) {
                     this.symbols[potentialLabel] = address;
+                    this.symbolOriginalCase[potentialLabel.toLowerCase()] = potentialLabel; // 保存原始大小写
                 }
 
                 const dataPart = line.substring(dbIndex + 4).trim();
@@ -237,6 +242,7 @@ class Assembler {
                 const potentialLabel = line.substring(0, dwIndex).trim();
                 if (potentialLabel && !potentialLabel.startsWith(';')) {
                     this.symbols[potentialLabel] = address;
+                    this.symbolOriginalCase[potentialLabel.toLowerCase()] = potentialLabel; // 保存原始大小写
                 }
 
                 const dataPart = line.substring(dwIndex + 4).trim();
@@ -267,6 +273,7 @@ class Assembler {
                 const potentialLabel = line.substring(0, ddIndex).trim();
                 if (potentialLabel && !potentialLabel.startsWith(';')) {
                     this.symbols[potentialLabel] = address;
+                    this.symbolOriginalCase[potentialLabel.toLowerCase()] = potentialLabel; // 保存原始大小写
                 }
 
                 const dataPart = line.substring(ddIndex + 4).trim();
@@ -295,6 +302,7 @@ class Assembler {
                 const potentialLabel = line.substring(0, dqIndex).trim();
                 if (potentialLabel && !potentialLabel.startsWith(';')) {
                     this.symbols[potentialLabel] = address;
+                    this.symbolOriginalCase[potentialLabel.toLowerCase()] = potentialLabel; // 保存原始大小写
                 }
 
                 const dataPart = line.substring(dqIndex + 4).trim();
@@ -323,6 +331,7 @@ class Assembler {
                 const potentialLabel = line.substring(0, dtIndex).trim();
                 if (potentialLabel && !potentialLabel.startsWith(';')) {
                     this.symbols[potentialLabel] = address;
+                    this.symbolOriginalCase[potentialLabel.toLowerCase()] = potentialLabel; // 保存原始大小写
                 }
 
                 const dataPart = line.substring(dtIndex + 4).trim();
@@ -358,6 +367,7 @@ class Assembler {
             if (labelMatch) {
                 const labelName = labelMatch[1];
                 this.symbols[labelName] = address;
+                this.symbolOriginalCase[labelName.toLowerCase()] = labelName; // 保存原始大小写
                 continue;
             }
 
@@ -369,6 +379,7 @@ class Assembler {
                 const valuePart = equalMatch[2].trim();
                 const value = this.parseImmediate(valuePart);
                 this.symbols[label] = value;
+                this.symbolOriginalCase[label.toLowerCase()] = label; // 保存原始大小写
                 // = 可以重新定义，所以不需要检查是否已存在
                 this.equDefinitions.push({
                     label: label,
@@ -387,6 +398,7 @@ class Assembler {
                     const valuePart = line.substring(equIndex + 5).trim();
                     const value = this.parseImmediate(valuePart);
                     this.symbols[potentialLabel] = value; // EQU定义的是常量值，不是地址
+                    this.symbolOriginalCase[potentialLabel.toLowerCase()] = potentialLabel; // 保存原始大小写
                     // 保存EQU定义信息
                     this.equDefinitions.push({
                         label: potentialLabel,
@@ -407,6 +419,7 @@ class Assembler {
                 const potentialLabel = line.substring(0, procIndex).trim();
                 if (potentialLabel && !potentialLabel.startsWith(';')) {
                     this.symbols[potentialLabel] = address;
+                    this.symbolOriginalCase[potentialLabel.toLowerCase()] = potentialLabel; // 保存原始大小写
                 }
                 // proc伪指令本身不占用空间
                 continue;
@@ -419,8 +432,7 @@ class Assembler {
                 continue;
             }
 
-            // 估算指令长度（简单实现，实际需要更复杂的计算）
-            address += this.estimateInstructionLength(line);
+            address += this.getInstructionLength(line);
         }
 
         // 第一遍结束后，重新计算纯标签行的地址
@@ -432,7 +444,7 @@ class Assembler {
             if (line === '' || line.startsWith(';')) {
                 continue;
             }
-            
+
             const directiveType = this.getDirectiveType(line);
             if (directiveType) {
                 if (directiveType === 'data' || directiveType === 'code') {
@@ -440,7 +452,7 @@ class Assembler {
                 }
                 continue;
             }
-            
+
             if (line.endsWith(':')) {
                 // 检查是否是纯标签行
                 let hasInstruction = false;
@@ -451,41 +463,40 @@ class Assembler {
                         hasInstruction = true;
                     }
                 }
-                
+
                 if (!hasInstruction) {
                     // 纯标签行：记录下一条指令的地址（当前address就是下一条指令的地址）
                     lineAddresses[i] = address;
                 }
                 continue;
             }
-            
+
             // 跳过 PROC 和 ENDP 伪指令
             const parts = line.split(/\s+/).filter(Boolean);
             const firstWord = parts.length > 0 ? parts[0].toLowerCase() : '';
             const secondWord = parts.length > 1 ? parts[1].toLowerCase() : '';
-            if (firstWord === 'proc' || secondWord === 'proc' || 
+            if (firstWord === 'proc' || secondWord === 'proc' ||
                 firstWord === 'endp' || secondWord === 'endp') {
                 continue;
             }
-            
+
             // 跳过 EQU 常量定义
             if (line.toLowerCase().includes(' equ ')) {
                 continue;
             }
-            
+
             // 跳过等号赋值
             const equalMatch = line.match(/^(\w+)\s*=\s*(.+)$/);
             if (equalMatch && !line.toLowerCase().includes(' equ ')) {
                 continue;
             }
-            
+
             // 记录这条指令的地址
             lineAddresses[i] = address;
-            
-            // 累加指令长度
-            address += this.estimateInstructionLength(line);
+
+            address += this.getInstructionLength(line);
         }
-        
+
         // 更新纯标签行的地址为下一条指令的地址
         for (const label in this.symbols) {
             if (typeof this.symbols[label] === 'object' && this.symbols[label].type === 'forward') {
@@ -514,6 +525,10 @@ class Assembler {
                 }
                 if (foundAddr !== undefined) {
                     this.symbols[label] = foundAddr;
+                    // 保留原始大小写信息，如果不存在的话
+                    if (!this.symbolOriginalCase[label.toLowerCase()]) {
+                        this.symbolOriginalCase[label.toLowerCase()] = label; // 保存原始大小写
+                    }
                 }
             }
         }
@@ -527,6 +542,7 @@ class Assembler {
             if (line === '' || line.startsWith(';')) {
                 continue; // 跳过空行和注释
             }
+
 
             // 检查是否是段切换伪指令
             const directiveType = this.getDirectiveType(line);
@@ -780,7 +796,7 @@ class Assembler {
                                   lowerLineForData.startsWith('dt ');
                 if (isDataDef) {
                     // 跳过数据定义，但更新地址
-                    const dataLen = this.estimateInstructionLength(line);
+                    const dataLen = this.getInstructionLength(line);
                     address += dataLen;
                     continue;
                 }
@@ -795,12 +811,53 @@ class Assembler {
                 address += instruction.length;
             }
         }
-        
+
+        // 在所有指令处理完成后，修正跳转指令的偏移量
+        this.fixJumpOffsets();
+
         return this.instructions;
     }
-    
-    // 估算指令长度
-    estimateInstructionLength(line) {
+
+    // 修正跳转指令的偏移量
+    fixJumpOffsets() {
+        for (let i = 0; i < this.instructions.length; i++) {
+            const instr = this.instructions[i];
+            if (instr.opcode &&
+                ['JMP', 'JZ', 'JE', 'JNZ', 'JNE', 'JB', 'JC', 'JNAE', 'JNB', 'JAE', 'JNC',
+                 'JS', 'JNS', 'JO', 'JNO', 'JP', 'JPE', 'JNP', 'JPO', 'JL', 'JNGE', 'JNL',
+                 'JGE', 'JA', 'JNBE', 'JNA', 'JBE', 'JG', 'JNLE', 'JNG', 'JLE', 'LOOP',
+                 'LOOPE', 'LOOPZ', 'LOOPNE', 'LOOPNZ', 'JCXZ'].includes(instr.opcode)) {
+
+                // 检查操作数是否是标签
+                if (instr.operands && instr.operands.length > 0) {
+                    const targetLabel = instr.operands[0]; // 跳转目标
+                    // 如果目标是标签而不是立即数，重新计算偏移量
+                    if (typeof targetLabel === 'string' && this.symbols[targetLabel.toUpperCase()]) {
+                        const targetAddr = this.symbols[targetLabel.toUpperCase()];
+                        let newOffset;
+
+                        if (instr.opcode === 'JMP' && instr.length === 2) {
+                            // JMP short
+                            newOffset = targetAddr - (instr.address + 2);
+                            instr.machineCode[1] = newOffset & 0xff;
+                        } else if (instr.opcode === 'JMP' && instr.length === 3) {
+                            // JMP near
+                            newOffset = targetAddr - (instr.address + 3);
+                            instr.machineCode[1] = newOffset & 0xff;
+                            instr.machineCode[2] = (newOffset >> 8) & 0xff;
+                        } else if (instr.length === 2 && instr.machineCode[0] >= 0x70 && instr.machineCode[0] <= 0x7F) {
+                            // 条件跳转 short (0x70-0x7F)
+                            newOffset = targetAddr - (instr.address + 2);
+                            instr.machineCode[1] = newOffset & 0xff;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 获取指令的真实长度
+    getInstructionLength(line) {
         // 简单实现，实际需要更复杂的解析
         const lineWithoutComment = line.split(';')[0].trim();
 
@@ -901,68 +958,217 @@ class Assembler {
             case 'and':
             case 'or':
             case 'xor':
-                if (operands[0] === 'al') return 2;
-                // XOR AX, AX - 寄存器到寄存器，2字节
-                if (operands[0] === 'ax' && operands[1] === 'ax') return 2;
-                if (operands[0] === 'ax') return 3;
-                if ((operands[0] === 'bx' || operands[0] === 'cx' || operands[0] === 'dx') && this.isImmediate(operands[1])) return 4;
-                // ADD r8, imm8 (如 ADD DL, 07H) - 3字节
-                if (['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'].includes(operands[0]) && this.isImmediate(operands[1])) {
-                    return 3;
+                // 综合长度策略，支持寄存器、内存和立即数
+                if (operands.length === 2) {
+                    const op0 = operands[0];
+                    const op1 = operands[1];
+                    
+                    // 辅助函数：检查是否为内存操作数
+                    const isMemoryOperand = (op) => {
+                        const cleanOp = op.replace(/\b(byte|word)\s+ptr\s+/gi, '').trim();
+                        return cleanOp.includes('[');
+                    };
+                    
+                    // 辅助函数：估计内存操作数长度
+                    const estimateMemoryLength = (op) => {
+                        const cleanOp = op.replace(/\b(byte|word)\s+ptr\s+/gi, '').trim();
+                        if (!cleanOp.includes('[')) return 0; // 不是内存操作数
+                        
+                        const match = cleanOp.match(/\[(.*?)\]/);
+                        if (!match) return 4; // 保守估计
+                        
+                        const inside = match[1].toLowerCase().trim();
+                        
+                        // 检查是否有 + 号（带位移的间接寻址）
+                        if (inside.includes('+')) {
+                            // 检查位移是否在 -128 到 127 范围内
+                            const parts = inside.split('+');
+                            const lastPart = parts[parts.length - 1].trim();
+                            // 简单判断：如果有数字或h结尾，可能是直接位移
+                            if (/^\d+$/.test(lastPart) || /^\d+[hH]$/.test(lastPart)) {
+                                const num = parseInt(lastPart.replace(/[hH]$/, ''), 
+                                    lastPart.toLowerCase().endsWith('h') ? 16 : 10);
+                                if (num >= -128 && num <= 127) {
+                                    return 3; // 短位移
+                                }
+                            }
+                            return 4; // 长位移或复杂位移
+                        }
+                        
+                        // 寄存器间接寻址
+                        const regNames = ['ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'];
+                        if (regNames.some(reg => inside === reg)) {
+                            return 2;
+                        }
+                        
+                        // 直接地址
+                        return 4;
+                    };
+                    
+                    // 情况1：立即数操作 (寄存器/内存 <- 立即数)
+                    if (this.isImmediate(op1)) {
+                        // 子情况1A：寄存器 <- 立即数
+                        if (!isMemoryOperand(op0)) {
+                            const reg = op0;
+                            // 8位寄存器
+                            if (['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'].includes(reg)) {
+                                // AL有优化：2字节，其他8位寄存器：3字节
+                                return reg === 'al' ? 2 : 3;
+                            }
+                            // 16位寄存器
+                            if (['ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'].includes(reg)) {
+                                // AX有优化：3字节，其他16位寄存器：4字节
+                                return reg === 'ax' ? 3 : 4;
+                            }
+                            // 未知寄存器或标签：保守估计6字节
+                            return 6;
+                        }
+                        
+                        // 子情况1B：内存 <- 立即数
+                        const memLength = estimateMemoryLength(op0);
+                        // 根据表格：内存+立即数 = 内存长度 + 立即数长度
+                        // 对于直接地址+imm8: 4字节，直接地址+imm16: 5字节
+                        // 保守估计：内存长度 + 2字节（立即数）
+                        return memLength + 2;
+                    }
+                    
+                    // 情况2：内存操作 (寄存器 <- 内存 或 内存 <- 寄存器)
+                    const op0IsMem = isMemoryOperand(op0);
+                    const op1IsMem = isMemoryOperand(op1);
+                    
+                    if (op0IsMem && !op1IsMem) {
+                        // 内存 <- 寄存器
+                        return estimateMemoryLength(op0);
+                    } else if (!op0IsMem && op1IsMem) {
+                        // 寄存器 <- 内存
+                        return estimateMemoryLength(op1);
+                    } else if (op0IsMem && op1IsMem) {
+                        // 内存 <- 内存（不支持，但保守估计）
+                        return Math.max(estimateMemoryLength(op0), estimateMemoryLength(op1)) + 2;
+                    }
+                    
+                    // 情况3：寄存器 <- 寄存器
+                    return 2;
                 }
+                // 默认情况：保守估计2字节
                 return 2;
             case 'adc':
             case 'sbb':
-                if (operands[0] === 'al') return 2;
-                if (operands[0] === 'ax') return 3;
-                if ((operands[0] === 'bx' || operands[0] === 'cx' || operands[0] === 'dx') && this.isImmediate(operands[1])) return 4;
-                return 2;
-            case 'mov':
-                // MOV 内存[寄存器], 立即数 (如 arr[si], 1)
-                if (operands[0].includes('[') && operands[0].endsWith(']') && this.isImmediate(operands[1])) {
-                    const immValue = this.parseImmediate(operands[1]);
-                    // 如果是label[reg]格式，指令长度更长（需要包含位移量）
-                    if (!operands[0].startsWith('[')) {
-                        // 提取标签名，检查位移量大小
-                        const bracketMatch = operands[0].match(/^(.+?)\[(.+?)\]$/);
-                        if (bracketMatch) {
-                            const labelPart = bracketMatch[1];
-                            // 检查标签是否在symbols中
-                            if (this.symbols.hasOwnProperty(labelPart)) {
-                                const labelOffset = this.symbols[labelPart];
-                                // 判断位移量是8位还是16位
-                                const disp8 = labelOffset >= -128 && labelOffset <= 127;
-                                if (immValue >= 0 && immValue <= 255) {
-                                    // 8位立即数 + 8位位移 = 4字节, 或 8位立即数 + 16位位移 = 5字节
-                                    return disp8 ? 4 : 5;
-                                } else {
-                                    // 16位立即数 + 8位位移 = 5字节, 或 16位立即数 + 16位位移 = 6字节
-                                    return disp8 ? 5 : 6;
+                // 使用与ADD相同的综合长度策略
+                if (operands.length === 2) {
+                    const op0 = operands[0];
+                    const op1 = operands[1];
+                    
+                    // 辅助函数：检查是否为内存操作数
+                    const isMemoryOperand = (op) => {
+                        const cleanOp = op.replace(/\b(byte|word)\s+ptr\s+/gi, '').trim();
+                        return cleanOp.includes('[');
+                    };
+                    
+                    // 辅助函数：估计内存操作数长度
+                    const estimateMemoryLength = (op) => {
+                        const cleanOp = op.replace(/\b(byte|word)\s+ptr\s+/gi, '').trim();
+                        if (!cleanOp.includes('[')) return 0; // 不是内存操作数
+                        
+                        const match = cleanOp.match(/\[(.*?)\]/);
+                        if (!match) return 4; // 保守估计
+                        
+                        const inside = match[1].toLowerCase().trim();
+                        
+                        // 检查是否有 + 号（带位移的间接寻址）
+                        if (inside.includes('+')) {
+                            // 检查位移是否在 -128 到 127 范围内
+                            const parts = inside.split('+');
+                            const lastPart = parts[parts.length - 1].trim();
+                            // 简单判断：如果有数字或h结尾，可能是直接位移
+                            if (/^\d+$/.test(lastPart) || /^\d+[hH]$/.test(lastPart)) {
+                                const num = parseInt(lastPart.replace(/[hH]$/, ''), 
+                                    lastPart.toLowerCase().endsWith('h') ? 16 : 10);
+                                if (num >= -128 && num <= 127) {
+                                    return 3; // 短位移
                                 }
                             }
+                            return 4; // 长位移或复杂位移
                         }
-                        return (immValue >= 0 && immValue <= 255) ? 4 : 5; // 默认值
+                        
+                        // 寄存器间接寻址
+                        const regNames = ['ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'];
+                        if (regNames.some(reg => inside === reg)) {
+                            return 2;
+                        }
+                        
+                        // 直接地址
+                        return 4;
+                    };
+                    
+                    // 情况1：立即数操作 (寄存器/内存 <- 立即数)
+                    if (this.isImmediate(op1)) {
+                        // 子情况1A：寄存器 <- 立即数
+                        if (!isMemoryOperand(op0)) {
+                            const reg = op0;
+                            // 8位寄存器
+                            if (['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'].includes(reg)) {
+                                // AL有优化：2字节，其他8位寄存器：3字节
+                                return reg === 'al' ? 2 : 3;
+                            }
+                            // 16位寄存器
+                            if (['ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'].includes(reg)) {
+                                // AX有优化：3字节，其他16位寄存器：4字节
+                                return reg === 'ax' ? 3 : 4;
+                            }
+                            // 未知寄存器或标签：保守估计6字节
+                            return 6;
+                        }
+                        
+                        // 子情况1B：内存 <- 立即数
+                        const memLength = estimateMemoryLength(op0);
+                        // 保守估计：内存长度 + 2字节（立即数）
+                        return memLength + 2;
                     }
-                    return (immValue >= 0 && immValue <= 255) ? 3 : 4;
+                    
+                    // 情况2：内存操作 (寄存器 <- 内存 或 内存 <- 寄存器)
+                    const op0IsMem = isMemoryOperand(op0);
+                    const op1IsMem = isMemoryOperand(op1);
+                    
+                    if (op0IsMem && !op1IsMem) {
+                        // 内存 <- 寄存器
+                        return estimateMemoryLength(op0);
+                    } else if (!op0IsMem && op1IsMem) {
+                        // 寄存器 <- 内存
+                        return estimateMemoryLength(op1);
+                    } else if (op0IsMem && op1IsMem) {
+                        // 内存 <- 内存（不支持，但保守估计）
+                        return Math.max(estimateMemoryLength(op0), estimateMemoryLength(op1)) + 2;
+                    }
+                    
+                    // 情况3：寄存器 <- 寄存器
+                    return 2;
                 }
-                // MOV 内存[寄存器], 立即数 (如 [si], 1)
-                if (operands[0].startsWith('[') && operands[0].endsWith(']') && this.isImmediate(operands[1])) {
-                    const immValue = this.parseImmediate(operands[1]);
-                    return (immValue >= 0 && immValue <= 255) ? 3 : 4;
+                // 默认情况：保守估计2字节
+                return 2;
+            case 'mov':
+                // 使用最坏情况长度策略
+                if (this.isImmediate(operands[1])) {
+                    // 立即数操作：一律使用16位立即数长度
+                    if (operands[0].includes('[')) {
+                        // 内存寻址 + 立即数：最坏情况6字节
+                        return 6;
+                    } else if (!['ax', 'bx', 'cx', 'dx', 'si', 'di', 'al', 'ah', 'bl', 'bh', 'cl', 'ch', 'dl', 'dh'].includes(operands[0])) {
+                        // 标签 + 立即数：最坏情况6字节
+                        return 6;
+                    } else if (['ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'].includes(operands[0])) {
+                        // 16位寄存器 + 立即数：3字节
+                        return 3;
+                    } else {
+                        // 8位寄存器 + 立即数：2字节
+                        return 2;
+                    }
                 }
-                // MOV 标签, 立即数 (检查是否不是寄存器且第二个操作数是立即数)
-                if (!['ax', 'bx', 'cx', 'dx', 'si', 'di', 'al', 'ah', 'bl', 'bh', 'cl', 'ch', 'dl', 'dh'].includes(operands[0]) && this.isImmediate(operands[1])) {
-                    const immValue = this.parseImmediate(operands[1]);
-                    return (immValue >= 0 && immValue <= 255) ? 5 : 6;
+                // 内存寻址操作：最坏情况4字节
+                if (operands[0].includes('[') || operands[1].includes('[')) {
+                    return 4;
                 }
-                // 16位寄存器立即数（包括标签）
-                if ((operands[0] === 'ax' || operands[0] === 'bx' || operands[0] === 'cx' || operands[0] === 'dx' || operands[0] === 'si' || operands[0] === 'di' || operands[0] === 'bp' || operands[0] === 'sp') && this.isImmediate(operands[1])) return 3;
-                // 8位寄存器立即数
-                if (['al', 'ah', 'bl', 'bh', 'cl', 'ch', 'dl', 'dh'].includes(operands[0]) && this.isImmediate(operands[1])) return 2;
-                // MOV CX, [label] - 直接内存寻址读取16位
-                if (operands[0] === 'cx' && operands[1].startsWith('[') && operands[1].endsWith(']')) return 4;
-                // MOV [label], AL - 直接内存寻址写入8位
-                if (operands[0].startsWith('[') && operands[0].endsWith(']') && operands[1] === 'al') return 4;
+                // 寄存器到寄存器：2字节
                 return 2;
             case 'shl':
             case 'shr':
@@ -978,18 +1184,107 @@ class Assembler {
                 return 1;
             case 'cmp':
             case 'test':
-                if (operands[0] === 'al') return 2;
-                if (operands[0] === 'ax') return 3;
-                // 对于8位寄存器的立即数比较（非AL），返回3字节长度
-                if (['cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'].includes(operands[0]) && this.isImmediate(operands[1])) return 3;
-                // 对于si, di, sp, bp寄存器的立即数比较，返回4字节长度
-                const specialRegisters = ['si', 'di', 'sp', 'bp'];
-                if (specialRegisters.includes(operands[0].toLowerCase()) && this.isImmediate(operands[1])) return 4;
-                // 对于bx, cx, dx寄存器的立即数比较，返回4字节长度
-                if (['bx', 'cx', 'dx'].includes(operands[0].toLowerCase()) && this.isImmediate(operands[1])) return 4;
+                // 使用与ADD相同的综合长度策略
+                if (operands.length === 2) {
+                    const op0 = operands[0];
+                    const op1 = operands[1];
+                    
+                    // 辅助函数：检查是否为内存操作数
+                    const isMemoryOperand = (op) => {
+                        const cleanOp = op.replace(/\b(byte|word)\s+ptr\s+/gi, '').trim();
+                        return cleanOp.includes('[');
+                    };
+                    
+                    // 辅助函数：估计内存操作数长度
+                    const estimateMemoryLength = (op) => {
+                        const cleanOp = op.replace(/\b(byte|word)\s+ptr\s+/gi, '').trim();
+                        if (!cleanOp.includes('[')) return 0; // 不是内存操作数
+                        
+                        const match = cleanOp.match(/\[(.*?)\]/);
+                        if (!match) return 4; // 保守估计
+                        
+                        const inside = match[1].toLowerCase().trim();
+                        
+                        // 检查是否有 + 号（带位移的间接寻址）
+                        if (inside.includes('+')) {
+                            // 检查位移是否在 -128 到 127 范围内
+                            const parts = inside.split('+');
+                            const lastPart = parts[parts.length - 1].trim();
+                            // 简单判断：如果有数字或h结尾，可能是直接位移
+                            if (/^\d+$/.test(lastPart) || /^\d+[hH]$/.test(lastPart)) {
+                                const num = parseInt(lastPart.replace(/[hH]$/, ''), 
+                                    lastPart.toLowerCase().endsWith('h') ? 16 : 10);
+                                if (num >= -128 && num <= 127) {
+                                    return 3; // 短位移
+                                }
+                            }
+                            return 4; // 长位移或复杂位移
+                        }
+                        
+                        // 寄存器间接寻址
+                        const regNames = ['ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'];
+                        if (regNames.some(reg => inside === reg)) {
+                            return 2;
+                        }
+                        
+                        // 直接地址
+                        return 4;
+                    };
+                    
+                    // 情况1：立即数操作 (寄存器/内存 <- 立即数)
+                    if (this.isImmediate(op1)) {
+                        // 子情况1A：寄存器 <- 立即数
+                        if (!isMemoryOperand(op0)) {
+                            const reg = op0;
+                            // 8位寄存器
+                            if (['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'].includes(reg)) {
+                                // AL有优化：2字节，其他8位寄存器：3字节
+                                return reg === 'al' ? 2 : 3;
+                            }
+                            // 16位寄存器
+                            if (['ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'].includes(reg)) {
+                                // AX有优化：3字节，其他16位寄存器：4字节
+                                return reg === 'ax' ? 3 : 4;
+                            }
+                            // 未知寄存器或标签：保守估计6字节
+                            return 6;
+                        }
+                        
+                        // 子情况1B：内存 <- 立即数
+                        const memLength = estimateMemoryLength(op0);
+                        // 保守估计：内存长度 + 2字节（立即数）
+                        return memLength + 2;
+                    }
+                    
+                    // 情况2：内存操作 (寄存器 <- 内存 或 内存 <- 寄存器)
+                    const op0IsMem = isMemoryOperand(op0);
+                    const op1IsMem = isMemoryOperand(op1);
+                    
+                    if (op0IsMem && !op1IsMem) {
+                        // 内存 <- 寄存器
+                        return estimateMemoryLength(op0);
+                    } else if (!op0IsMem && op1IsMem) {
+                        // 寄存器 <- 内存
+                        return estimateMemoryLength(op1);
+                    } else if (op0IsMem && op1IsMem) {
+                        // 内存 <- 内存（不支持，但保守估计）
+                        return Math.max(estimateMemoryLength(op0), estimateMemoryLength(op1)) + 2;
+                    }
+                    
+                    // 情况3：寄存器 <- 寄存器
+                    return 2;
+                }
+                // 默认情况：保守估计2字节
                 return 2;
             case 'jmp':
-                return 3; // 返回 near 的长度，因为更常用（避免short和near长度不一致导致标签地址错误）
+                // 根据语法明确确定JMP指令长度
+                if (operands.length === 2 && operands[0] === 'short') {
+                    return 2; // JMP SHORT
+                } else if (operands.length === 2 && operands[0] === 'far') {
+                    return 5; // JMP FAR
+                } else {
+                    return 3; // JMP NEAR 或 默认
+                }
             case 'jz':
             case 'je':
             case 'jnz':
@@ -1028,14 +1323,55 @@ class Assembler {
             case 'jcxz':
                 return 2;
             case 'call':
-                return 3;
+                // 根据语法明确确定CALL指令长度
+                if (operands.length === 2 && operands[0] === 'far') {
+                    return 5; // CALL FAR
+                } else {
+                    return 3; // CALL NEAR 或 默认
+                }
             case 'int':
                 return 2;
             case 'inc':
             case 'dec':
+                if (operands.length > 0) {
+                    const op = operands[0];
+                    // 移除可能的 byte ptr 和 word ptr 前缀
+                    const cleanOp = op.replace(/\b(byte|word)\s+ptr\s+/gi, '').trim();
+                    
+                    // 检查是否是内存操作数（包含 [）
+                    if (cleanOp.includes('[')) {
+                        // 提取括号内的内容
+                        const match = cleanOp.match(/\[(.*?)\]/);
+                        if (match) {
+                            const inside = match[1].toLowerCase().trim();
+                            // 检查是否有 + 号（带位移的间接寻址）
+                            if (inside.includes('+')) {
+                                return 3; // INC BYTE PTR [BX+5] 等，3字节
+                            }
+                            // 检查是否是寄存器间接寻址
+                            const regNames = ['ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'];
+                            if (regNames.some(reg => inside === reg)) {
+                                return 2; // INC BYTE PTR [BX] 等，2字节
+                            }
+                        }
+                        // 其他情况（直接寻址、复杂寻址）：保守估计4字节
+                        return 4;
+                    }
+                    
+                    // 寄存器操作数
+                    const reg = op;
+                    // 16位寄存器：1字节，8位寄存器：2字节
+                    if (['ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'].includes(reg)) {
+                        return 1;
+                    } else if (['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'].includes(reg)) {
+                        return 2;
+                    }
+                }
+                // 默认保守估计：4字节（最坏情况的内存操作数）
+                return 4;
             case 'neg':
             case 'not':
-                return 1;
+                return 2; // 总是2字节
             case 'mul':
             case 'imul':
             case 'div':
@@ -1071,10 +1407,10 @@ class Assembler {
         let currentValue = '';
         let inString = false;
         let stringDelimiter = '';
-        
+
         for (let i = 0; i < dataWithoutComment.length; i++) {
             const char = dataWithoutComment[i];
-            
+
             if ((char === "'" || char === '"') && !inString) {
                 // 开始一个字符串
                 inString = true;
@@ -1093,7 +1429,7 @@ class Assembler {
                 currentValue += char;
             }
         }
-        
+
         // 添加最后一个值
         if (currentValue.trim() !== '') {
             values.push(currentValue.trim());
@@ -1107,12 +1443,12 @@ class Assembler {
                     // 解析重复次数
                     const countStr = value.substring(0, dupIndex).trim();
                     const count = parseInt(countStr);
-                    
+
                     // 解析重复的值
                     const valueStart = value.indexOf('(') + 1;
                     const valueEnd = value.lastIndexOf(')');
                     const dupValue = value.substring(valueStart, valueEnd).trim();
-                    
+
                     // 解析重复值
                     let parsedDupValue;
                     if (dupValue.startsWith("'") && dupValue.endsWith("'")) {
@@ -1125,7 +1461,7 @@ class Assembler {
                         // 立即数
                         parsedDupValue = this.parseImmediate(dupValue);
                     }
-                    
+
                     // 添加重复的值
                     for (let i = 0; i < count; i++) {
                         result.push(isNaN(parsedDupValue) ? 0 : (parsedDupValue & 0xff));
@@ -1154,20 +1490,20 @@ class Assembler {
         }
         return result;
     }
-    
+
     // 解析 DW 数据定义
     parseDW(dataPart) {
         const result = [];
         // 移除注释
         const dataWithoutComment = dataPart.split(';')[0].trim();
-        
+
         // 正确分割多个值（用逗号分隔）
         const values = [];
         let currentValue = '';
-        
+
         for (let i = 0; i < dataWithoutComment.length; i++) {
             const char = dataWithoutComment[i];
-            
+
             if (char === ',' && !currentValue.includes('"') && !currentValue.includes("'")) {
                 // 分隔符，添加当前值并重置
                 values.push(currentValue.trim());
@@ -1177,7 +1513,7 @@ class Assembler {
                 currentValue += char;
             }
         }
-        
+
         // 添加最后一个值
         if (currentValue.trim() !== '') {
             values.push(currentValue.trim());
@@ -1255,7 +1591,7 @@ class Assembler {
 
         for (const value of values) {
             const trimmedValue = value.trim();
-            
+
             // 检查是否是64位十六进制值（需要特殊处理，因为JS的number无法精确表示）
             let hexStr = null;
             if (trimmedValue.startsWith('0x') || trimmedValue.startsWith('0X')) {
@@ -1263,17 +1599,17 @@ class Assembler {
             } else if (trimmedValue.endsWith('h') || trimmedValue.endsWith('H')) {
                 hexStr = trimmedValue.slice(0, -1);
             }
-            
+
             if (hexStr && hexStr.length > 8) {
                 // 64位十六进制值，手动解析为高32位和低32位
                 // 补齐到16个字符
                 hexStr = hexStr.padStart(16, '0');
                 const lowStr = hexStr.substring(8, 16);   // 低8位字符
                 const highStr = hexStr.substring(0, 8);   // 高8位字符
-                
+
                 const low = parseInt(lowStr, 16) || 0;
                 const high = parseInt(highStr, 16) || 0;
-                
+
                 // 小端序输出：低字节在前
                 // 低32位（4字节）
                 result.push((low >> 0) & 0xff);
@@ -2085,7 +2421,7 @@ class Assembler {
                         const reg = reg16Map[operands[0]];
                         const modRM = (memOp1.mod << 6) | (reg << 3) | memOp1.rm;
                         const machineCode = [0x8b, modRM];
-                        
+
                         // 处理标签寻址
                         if (memOp1.hasLabel && memOp1.labelName) {
                             // 查找标签地址
@@ -2121,7 +2457,7 @@ class Assembler {
                         const reg = reg8Map[operands[0]];
                         const modRM = (memOp1.mod << 6) | (reg << 3) | memOp1.rm;
                         const machineCode = [0x8a, modRM];
-                        
+
                         // 处理标签寻址
                         if (memOp1.hasLabel && memOp1.labelName) {
                             // 查找标签地址
@@ -2307,7 +2643,7 @@ class Assembler {
                             'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
                             'sp': 4, 'bp': 5, 'si': 6, 'di': 7
                         };
-                        
+
                         if (regMap.hasOwnProperty(srcReg)) {
                             const offset = this.symbols[label];
                             // MOV m16, r16 - 操作码89, mod=00, reg=源寄存器, r/m=110(直接寻址)
@@ -2330,7 +2666,7 @@ class Assembler {
                             'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
                             'sp': 4, 'bp': 5, 'si': 6, 'di': 7
                         };
-                        
+
                         if (regMap.hasOwnProperty(srcReg)) {
                             const offset = this.symbols[label];
                             // MOV m16, r16 - 操作码89, mod=00, reg=源寄存器, r/m=110(直接寻址)
@@ -2717,14 +3053,29 @@ class Assembler {
                 }
                 break;
             case 'ret':
-                return {
-                    address,
-                    opcode: 'RET',
-                    operands: [],
-                    machineCode: [0xc3],
-                    length: 1,
-                    originalLine: originalLine.trim()
-                };
+                if (operands.length === 0) {
+                    // RET (近返回) - 1字节
+                    return {
+                        address,
+                        opcode: 'RET',
+                        operands: [],
+                        machineCode: [0xc3],
+                        length: 1,
+                        originalLine: originalLine.trim()
+                    };
+                } else if (operands.length === 1 && this.isImmediate(operands[0])) {
+                    // RET imm16 (带弹出值) - 3字节
+                    const imm16 = this.parseImmediate(operands[0]);
+                    return {
+                        address,
+                        opcode: 'RET',
+                        operands: [operands[0]],
+                        machineCode: [0xc2, imm16 & 0xff, (imm16 >> 8) & 0xff],
+                        length: 3,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
             case 'shl':
                 if (operands[1] === '1') {
                     // 处理 SHL r/m, 1 指令
@@ -2740,7 +3091,7 @@ class Assembler {
                         'si': { opcode: 0xd1, modrm: 0xe6 },
                         'di': { opcode: 0xd1, modrm: 0xe7 }
                     };
-                    
+
                     if (regMap.hasOwnProperty(operands[0])) {
                         const info = regMap[operands[0]];
                         return {
@@ -2769,7 +3120,7 @@ class Assembler {
                         'si': { opcode: 0xd1, modrm: 0xe6 },
                         'di': { opcode: 0xd1, modrm: 0xe7 }
                     };
-                    
+
                     if (regMap.hasOwnProperty(operands[0])) {
                         const info = regMap[operands[0]];
                         return {
@@ -2792,7 +3143,7 @@ class Assembler {
                         'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
                         'sp': 4, 'bp': 5, 'si': 6, 'di': 7
                     };
-                    
+
                     if (reg8Map.hasOwnProperty(operands[0])) {
                         // SHR r/m8, CL - 操作码 D2, mod=11, reg=5 (SHR), rm=寄存器编码
                         const rm = reg8Map[operands[0]];
@@ -3042,10 +3393,9 @@ class Assembler {
                 break;
             case 'call':
                 if (operands.length === 1) {
+                    // CALL NEAR 或 默认 - 3字节
                     const targetAddress = this.parseImmediate(operands[0]);
-                    // CALL rel16 的偏移量 = 目标地址 - (当前地址 + 指令长度)
                     const offset = targetAddress - (address + 3);
-                    // 将偏移量转换为有符号的16位整数
                     const offset16 = offset & 0xffff;
                     return {
                         address,
@@ -3056,37 +3406,34 @@ class Assembler {
                         originalLine: 'CALL'
                     };
                 }
+                // 处理 CALL FAR label 格式
+                if (operands.length === 2 && operands[0] === 'far') {
+                    const targetAddress = this.parseImmediate(operands[1]);
+                    // CALL far (9A) - 段地址:偏移地址
+                    return {
+                        address,
+                        opcode: 'CALL',
+                        operands: ['FAR', operands[1]],
+                        machineCode: [0x9a, targetAddress & 0xff, (targetAddress >> 8) & 0xff, 0x00, 0x00], // 简化处理，段地址设为0
+                        length: 5,
+                        originalLine: 'CALL FAR'
+                    };
+                }
                 break;
             case 'jmp':
                 if (operands.length === 1) {
+                    // JMP NEAR 或 默认 - 3字节
                     const targetAddress = this.parseImmediate(operands[0]);
-                    // 先按near jump计算偏移量（3字节）
-                    const offsetNear = targetAddress - (address + 3);
-                    // 判断使用 short 还是 near ptr
-                    if (offsetNear >= -128 && offsetNear <= 127) {
-                        // JMP short (EB) - 2字节
-                        const offsetShort = targetAddress - (address + 2);
-                        const offset8 = offsetShort & 0xff;
-                        return {
-                            address,
-                            opcode: 'JMP',
-                            operands: [operands[0]],
-                            machineCode: [0xeb, offset8],
-                            length: 2,
-                            originalLine: 'JMP'
-                        };
-                    } else {
-                        // JMP near ptr (E9) - 3字节
-                        const offset16 = offsetNear & 0xffff;
-                        return {
-                            address,
-                            opcode: 'JMP',
-                            operands: [operands[0]],
-                            machineCode: [0xe9, offset16 & 0xff, (offset16 >> 8) & 0xff],
-                            length: 3,
-                            originalLine: 'JMP'
-                        };
-                    }
+                    const offset = targetAddress - (address + 3);
+                    const offset16 = offset & 0xffff;
+                    return {
+                        address,
+                        opcode: 'JMP',
+                        operands: [operands[0]],
+                        machineCode: [0xe9, offset16 & 0xff, (offset16 >> 8) & 0xff],
+                        length: 3,
+                        originalLine: 'JMP'
+                    };
                 }
                 // 处理 JMP SHORT label 格式
                 if (operands.length === 2 && operands[0] === 'short') {
@@ -3101,6 +3448,19 @@ class Assembler {
                         machineCode: [0xeb, offset8],
                         length: 2,
                         originalLine: 'JMP SHORT'
+                    };
+                }
+                // 处理 JMP FAR label 格式
+                if (operands.length === 2 && operands[0] === 'far') {
+                    const targetAddress = this.parseImmediate(operands[1]);
+                    // JMP far (EA) - 段地址:偏移地址
+                    return {
+                        address,
+                        opcode: 'JMP',
+                        operands: ['FAR', operands[1]],
+                        machineCode: [0xea, targetAddress & 0xff, (targetAddress >> 8) & 0xff, 0x00, 0x00], // 简化处理，段地址设为0
+                        length: 5,
+                        originalLine: 'JMP FAR'
                     };
                 }
                 break;
@@ -4560,14 +4920,29 @@ class Assembler {
                     originalLine: originalLine.trim()
                 };
             case 'retf':
-                return {
-                    address,
-                    opcode: 'RETF',
-                    operands: [],
-                    machineCode: [0xcb],
-                    length: 1,
-                    originalLine: originalLine.trim()
-                };
+                if (operands.length === 0) {
+                    // RETF (远返回) - 1字节
+                    return {
+                        address,
+                        opcode: 'RETF',
+                        operands: [],
+                        machineCode: [0xcb],
+                        length: 1,
+                        originalLine: originalLine.trim()
+                    };
+                } else if (operands.length === 1 && this.isImmediate(operands[0])) {
+                    // RETF imm16 (带弹出值) - 3字节
+                    const imm16 = this.parseImmediate(operands[0]);
+                    return {
+                        address,
+                        opcode: 'RETF',
+                        operands: [operands[0]],
+                        machineCode: [0xca, imm16 & 0xff, (imm16 >> 8) & 0xff],
+                        length: 3,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                break;
             case 'pushf':
                 return {
                     address,
@@ -5018,20 +5393,20 @@ class Assembler {
                 if (operands.length === 2) {
                     const destReg = operands[0].toLowerCase();
                     const srcOperand = operands[1];
-                    
+
                     const regMap = {
                         'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
                         'sp': 4, 'bp': 5, 'si': 6, 'di': 7
                     };
-                    
+
                     if (regMap.hasOwnProperty(destReg)) {
                         const modRM = (regMap[destReg] << 3) | 0x06;
                         let offset = 0;
-                        
+
                         // 处理带偏移的表达式，如 "LABEL+3" 或 "LABEL-5"
                         const plusIndex = srcOperand.indexOf('+');
                         const minusIndex = srcOperand.indexOf('-');
-                        
+
                         if (plusIndex !== -1) {
                             // 格式: LABEL+offset
                             const label = srcOperand.substring(0, plusIndex);
@@ -5063,7 +5438,7 @@ class Assembler {
                                 offset = this.parseImmediate(srcOperand);
                             }
                         }
-                        
+
                         return {
                             address,
                             opcode: 'LEA',
@@ -5089,7 +5464,7 @@ class Assembler {
                 }
                 break;
         }
-        
+
         // 未知指令
         console.warn(`未知指令: ${line}`);
         return {
@@ -5101,7 +5476,7 @@ class Assembler {
             originalLine: originalLine.trim()
         };
     }
-    
+
     // 解析立即数
     parseImmediate(value) {
         // 处理字符字面量 'X' 或 "X"
@@ -5303,13 +5678,13 @@ class Assembler {
             const labelName = labelPlusMatch[1];
             const operator = labelPlusMatch[2];
             const dispStr = labelPlusMatch[3];
-            
+
             // 检查labelName不是寄存器名，且dispStr是数字
-            const validRegs = ['bx', 'si', 'di', 'bp', 'ax', 'cx', 'dx', 'sp', 
+            const validRegs = ['bx', 'si', 'di', 'bp', 'ax', 'cx', 'dx', 'sp',
                                'al', 'ah', 'bl', 'bh', 'cl', 'ch', 'dl', 'dh'];
             if (!validRegs.includes(labelName)) {
                 const dispValue = this.parseImmediate(dispStr);
-                
+
                 if (!isNaN(dispValue)) {
                     const finalDisp = operator === '-' ? -dispValue : dispValue;
                     return {
@@ -5336,7 +5711,7 @@ class Assembler {
             this.memory.write8(instruction.address + i, instruction.machineCode[i]);
         }
     }
-    
+
     // 从文件加载汇编代码
     loadFromFile(file) {
         return new Promise((resolve, reject) => {
@@ -5352,12 +5727,12 @@ class Assembler {
             reader.readAsText(file);
         });
     }
-    
+
     // 获取解析后的指令列表
     getInstructions() {
         return this.instructions;
     }
-    
+
     // 获取符号表
     getSymbols() {
         return this.symbols;
