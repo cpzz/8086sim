@@ -13,6 +13,7 @@ class Assembler {
         this.model = 'small'; // 默认内存模型
         this.stackSize = 256; // 默认堆栈大小（100H）
         this.entryPoint = null; // 程序入口点
+        this.originalLines = []; // 原始代码行，用于显示伪指令
     }
 
     // 检查是否是伪指令，如果是段切换伪指令则返回段类型
@@ -115,6 +116,7 @@ class Assembler {
         this.codeDataSegments = []; // 代码段中的数据定义
         this.equDefinitions = [];
         this.currentSegment = 'code'; // 默认在代码段
+        this.originalLines = code.split('\n'); // 存储原始代码行
 
         // 按行分割代码
         const lines = code.split('\n');
