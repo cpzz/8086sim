@@ -86,7 +86,7 @@ CPU8086.prototype.step = function() {
             const imm16 = this.readMemory16(currentAddress + 1);
             const ax = this.getRegister('ax');
             const result16 = ax + imm16;
-            this.setRegister('ax', result16 & 0xffff);
+            this.setRegister('ax', result16);
             // 设置标志位
             this.updateFlags16(result16, ax, imm16);
             instructionLength = 3;
@@ -111,7 +111,7 @@ CPU8086.prototype.step = function() {
             const result13 = dstValue13 + srcValue13 + this.flags.cf;
             
             // 写回结果
-            this.setRegister(regToName13[reg13], result13 & 0xffff);
+            this.setRegister(regToName13[reg13], result13);
             
             // 更新标志位
             this.updateFlags16(result13, dstValue13, srcValue13 + this.flags.cf, 'add');
@@ -139,7 +139,7 @@ CPU8086.prototype.step = function() {
             const imm16adc = this.readMemory16(currentAddress + 1);
             const axadc = this.getRegister('ax');
             const result16adc = axadc + imm16adc + this.flags.cf;
-            this.setRegister('ax', result16adc & 0xffff);
+            this.setRegister('ax', result16adc);
             // 设置标志位
             this.updateFlags16(result16adc, axadc, imm16adc + this.flags.cf, 'add');
             instructionLength = 3;
@@ -199,7 +199,7 @@ CPU8086.prototype.step = function() {
             const result1b = dstValue1b - srcValue1b - carry1b;
             
             // 写回结果
-            this.setRegister(regToName1b[reg1b], result1b & 0xffff);
+            this.setRegister(regToName1b[reg1b], result1b);
             
             // 更新标志位
             this.updateFlags16(result1b, dstValue1b, srcValue1b + carry1b, 'sub');
@@ -228,7 +228,7 @@ CPU8086.prototype.step = function() {
             const axsbb = this.getRegister('ax');
             const carry1d = this.flags.cf;
             const result16sbb = axsbb - imm16sbb - carry1d;
-            this.setRegister('ax', result16sbb & 0xffff);
+            this.setRegister('ax', result16sbb);
             // 设置标志位
             this.updateFlags16(result16sbb, axsbb, imm16sbb + carry1d, 'sub');
             instructionLength = 3;
@@ -258,7 +258,7 @@ CPU8086.prototype.step = function() {
             const imm16sub = this.readMemory16(currentAddress + 1);
             const axsub = this.getRegister('ax');
             const resultsub16 = axsub - imm16sub;
-            this.setRegister('ax', resultsub16 & 0xffff);
+            this.setRegister('ax', resultsub16);
             // 设置标志位
             this.updateFlags16(resultsub16, axsub, imm16sub, 'sub');
             instructionLength = 3;
@@ -314,7 +314,7 @@ CPU8086.prototype.step = function() {
             const result2b = dstValue2b - srcValue2b;
             
             // 写回结果
-            this.setRegister(regToName2b[reg2b], result2b & 0xffff);
+            this.setRegister(regToName2b[reg2b], result2b);
             
             // 更新标志位
             this.updateFlags16(result2b, dstValue2b, srcValue2b, 'sub');
@@ -340,7 +340,7 @@ CPU8086.prototype.step = function() {
             const imm16and = this.readMemory16(currentAddress + 1);
             const axand = this.getRegister('ax');
             const resultand16 = axand & imm16and;
-            this.setRegister('ax', resultand16 & 0xffff);
+            this.setRegister('ax', resultand16);
             // 设置标志位
             this.updateFlags16(resultand16, axand, imm16and);
             instructionLength = 3;
@@ -358,7 +358,7 @@ CPU8086.prototype.step = function() {
             const imm16or = this.readMemory16(currentAddress + 1);
             const axor = this.getRegister('ax');
             const resultor16 = axor | imm16or;
-            this.setRegister('ax', resultor16 & 0xffff);
+            this.setRegister('ax', resultor16);
             // 设置标志位
             this.updateFlags16(resultor16, axor, imm16or);
             instructionLength = 3;
@@ -376,7 +376,7 @@ CPU8086.prototype.step = function() {
             const imm16xor = this.readMemory16(currentAddress + 1);
             const axxor = this.getRegister('ax');
             const resultxor16 = axxor ^ imm16xor;
-            this.setRegister('ax', resultxor16 & 0xffff);
+            this.setRegister('ax', resultxor16);
             // 设置标志位
             this.updateFlags16(resultxor16, axxor, imm16xor);
             instructionLength = 3;
@@ -428,8 +428,8 @@ CPU8086.prototype.step = function() {
                 const srcValue87 = this.getRegister(regToName87[reg87]);
                 const dstValue87 = this.getRegister(rmToName87[rm87]);
                 // 交换值
-                this.setRegister(rmToName87[rm87], srcValue87 & 0xffff);
-                this.setRegister(regToName87[reg87], dstValue87 & 0xffff);
+                this.setRegister(rmToName87[rm87], srcValue87);
+                this.setRegister(regToName87[reg87], dstValue87);
                 // XCHG 不影响标志位
                 instructionLength = 2;
             } else {
@@ -1116,7 +1116,6 @@ CPU8086.prototype.step = function() {
                 // 没有调用过函数，执行完最后一条指令
                 // 保持SP为初始值，符合DOS行为
                 // 设置IP为0xffff，表明无法继续执行
-                this.setRegister('ip', 0xffff);
                 return false; // 没有返回地址，停止执行
             } else {
                 // 正常情况，从堆栈弹出返回地址
@@ -1165,7 +1164,7 @@ CPU8086.prototype.step = function() {
         case 0x47: // INC DI
             const regInc = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'][opcode - 0x40];
             const valueInc = this.registers[regInc];
-            this.setRegister(regInc, (valueInc + 1) & 0xffff);
+            this.setRegister(regInc, (valueInc + 1));
             instructionLength = 1;
             break;
         case 0x48: // DEC AX
@@ -1178,7 +1177,7 @@ CPU8086.prototype.step = function() {
         case 0x4f: // DEC DI
             const regDec = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'][opcode - 0x48];
             const valueDec = this.registers[regDec];
-            const newValueDec = (valueDec - 1) & 0xffff;
+            const newValueDec = (valueDec - 1);
             this.setRegister(regDec, newValueDec);
             // 设置标志位
             this.flags.zf = (newValueDec === 0) ? 1 : 0;
@@ -1313,19 +1312,19 @@ CPU8086.prototype.step = function() {
                 if (reg16 === 0) {
                     // ROL - 循环左移
                     carryOut = (oldValue & 0x8000) >> 15;
-                    result = ((oldValue << 1) | carryOut) & 0xffff;
+                    result = ((oldValue << 1) | carryOut);
                 } else if (reg16 === 1) {
                     // ROR - 循环右移
                     carryOut = oldValue & 0x0001;
-                    result = ((oldValue >> 1) | (carryOut << 15)) & 0xffff;
+                    result = ((oldValue >> 1) | (carryOut << 15));
                 } else if (reg16 === 4) {
                     // SHL
                     carryOut = (oldValue & 0x8000) >> 15;
-                    result = (oldValue << 1) & 0xffff;
+                    result = (oldValue << 1);
                 } else if (reg16 === 5) {
                     // SHR
                     carryOut = oldValue & 0x0001;
-                    result = (oldValue >> 1) & 0xffff;
+                    result = (oldValue >> 1);
                 }
                 this.setRegister(destReg, result);
                 // 设置标志位
@@ -1466,25 +1465,25 @@ CPU8086.prototype.step = function() {
                 // ROL - 循环左移
                 for (let i = 0; i < shiftCount16cl; i++) {
                     carryOut16cl = (result16cl & 0x8000) >> 15;
-                    result16cl = ((result16cl << 1) | carryOut16cl) & 0xffff;
+                    result16cl = ((result16cl << 1) | carryOut16cl);
                 }
             } else if (reg16cl === 1) {
                 // ROR - 循环右移
                 for (let i = 0; i < shiftCount16cl; i++) {
                     carryOut16cl = result16cl & 0x0001;
-                    result16cl = ((result16cl >> 1) | (carryOut16cl << 15)) & 0xffff;
+                    result16cl = ((result16cl >> 1) | (carryOut16cl << 15));
                 }
             } else if (reg16cl === 4) {
                 // SHL
                 for (let i = 0; i < shiftCount16cl; i++) {
                     carryOut16cl = (result16cl & 0x8000) >> 15;
-                    result16cl = (result16cl << 1) & 0xffff;
+                    result16cl = (result16cl << 1);
                 }
             } else if (reg16cl === 5) {
                 // SHR
                 for (let i = 0; i < shiftCount16cl; i++) {
                     carryOut16cl = result16cl & 0x0001;
-                    result16cl = (result16cl >> 1) & 0xffff;
+                    result16cl = (result16cl >> 1);
                 }
             }
 
@@ -1648,7 +1647,7 @@ CPU8086.prototype.step = function() {
             // 写回结果（支持所有寻址模式）
             if (mod81 === 3) {
                 // 寄存器模式
-                this.setRegister(destReg81, result81 & 0xffff);
+                this.setRegister(destReg81, result81);
             } else {
                 // 内存模式
                 this.writeRM16(mod81, rm81, currentAddress, result81);
@@ -1700,7 +1699,7 @@ CPU8086.prototype.step = function() {
                 case 4: { // MUL (AL * r/m8 -> AX)
                     const al = this.getRegister('ax') & 0xff;
                     const prod = al * op8;
-                    const ax = prod & 0xffff;
+                    const ax = prod;
                     this.setRegister('ax', ax);
                     const ah = (ax >> 8) & 0xff;
                     this.flags.cf = this.flags.of = ah !== 0 ? 1 : 0;
@@ -1713,13 +1712,13 @@ CPU8086.prototype.step = function() {
                     if (al & 0x80) al -= 0x100;
                     if (b  & 0x80) b  -= 0x100;
                     const prod = al * b;
-                    this.setRegister('ax', prod & 0xffff);
+                    this.setRegister('ax', prod);
                     this.flags.cf = this.flags.of = (prod < -128 || prod > 127) ? 1 : 0;
                     instructionLength = 2;
                     break;
                 }
                 case 6: { // DIV
-                    const ax = this.getRegister('ax') & 0xffff;
+                    const ax = this.getRegister('ax');
                     const d  = op8;
                     if (d === 0 || Math.floor(ax / d) > 0xff) {
                         console.error('执行错误: DIV 除法错误');
@@ -1733,7 +1732,7 @@ CPU8086.prototype.step = function() {
                     break;
                 }
                 case 7: { // IDIV
-                    let ax = this.getRegister('ax') & 0xffff;
+                    let ax = this.getRegister('ax');
                     if (ax & 0x8000) ax -= 0x10000;
                     let d = op8;
                     if (d & 0x80) d -= 0x100;
@@ -1778,13 +1777,13 @@ CPU8086.prototype.step = function() {
 
             switch (reg) {
                 case 2: { // NOT
-                    const r = (~op16) & 0xffff;
+                    const r = (~op16);
                     this.setRegister(base, r);
                     instructionLength = 2;
                     break;
                 }
                 case 3: { // NEG
-                    const r = (-op16) & 0xffff;
+                    const r = (-op16);
                     this.setRegister(base, r);
                     this.updateFlags16(r, 0, op16, 'sub');
                     this.flags.cf = op16 !== 0 ? 1 : 0;
@@ -1792,10 +1791,10 @@ CPU8086.prototype.step = function() {
                     break;
                 }
                 case 4: { // MUL (AX * r/m16 -> DX:AX)
-                    const ax = this.getRegister('ax') & 0xffff;
-                    const prod = ax * (op16 & 0xffff);
-                    const axr = prod & 0xffff;
-                    const dxr = (prod >>> 16) & 0xffff;
+                    const ax = this.getRegister('ax');
+                    const prod = ax * (op16);
+                    const axr = prod;
+                    const dxr = (prod >>> 16);
                     this.setRegister('ax', axr);
                     this.setRegister('dx', dxr);
                     this.flags.cf = this.flags.of = dxr !== 0 ? 1 : 0;
@@ -1808,8 +1807,8 @@ CPU8086.prototype.step = function() {
                     if (ax & 0x8000) ax -= 0x10000;
                     if (b  & 0x8000) b  -= 0x10000;
                     const prod = ax * b;
-                    const axr = prod & 0xffff;
-                    const dxr = (prod >> 16) & 0xffff;
+                    const axr = prod;
+                    const dxr = (prod >> 16);
                     this.setRegister('ax', axr);
                     this.setRegister('dx', dxr);
                     this.flags.cf = this.flags.of = (prod < -32768 || prod > 32767) ? 1 : 0;
@@ -1817,28 +1816,28 @@ CPU8086.prototype.step = function() {
                     break;
                 }
                 case 6: { // DIV (DX:AX / r/m16)
-                    const ax = this.getRegister('ax') & 0xffff;
-                    const dx = this.getRegister('dx') & 0xffff;
+                    const ax = this.getRegister('ax');
+                    const dx = this.getRegister('dx');
                     const dividend = (dx << 16) | ax;
-                    const d = op16 & 0xffff;
+                    const d = op16;
                     if (d === 0 || Math.floor(dividend / d) > 0xffff) {
                         console.error('执行错误: DIV 除法错误');
                         this.running = false;
                         return false;
                     }
-                    const q = Math.floor(dividend / d) & 0xffff;
+                    const q = Math.floor(dividend / d);
                     const r = dividend % d;
                     this.setRegister('ax', q);
-                    this.setRegister('dx', r & 0xffff);
+                    this.setRegister('dx', r);
                     instructionLength = 2;
                     break;
                 }
                 case 7: { // IDIV (有符号 DX:AX / r/m16)
-                    let ax = this.getRegister('ax') & 0xffff;
-                    let dx = this.getRegister('dx') & 0xffff;
+                    let ax = this.getRegister('ax');
+                    let dx = this.getRegister('dx');
                     let dividend = (dx << 16) | ax;
                     if (dx & 0x8000) dividend -= 0x100000000;
-                    let d = op16 & 0xffff;
+                    let d = op16;
                     if (d & 0x8000) d -= 0x10000;
                     if (d === 0) {
                         console.error('执行错误: IDIV 被0除');
@@ -1852,8 +1851,8 @@ CPU8086.prototype.step = function() {
                         return false;
                     }
                     const r = dividend - q * d;
-                    this.setRegister('ax', q & 0xffff);
-                    this.setRegister('dx', r & 0xffff);
+                    this.setRegister('ax', q);
+                    this.setRegister('dx', r);
                     instructionLength = 2;
                     break;
                 }
@@ -1961,10 +1960,10 @@ CPU8086.prototype.step = function() {
                     const value = this.readMemory8(src);
                     this.writeMemory8(dst, value);
                     const delta = this.flags.df ? -1 : 1;
-                    this.setRegister('si', (si + delta) & 0xffff);
-                    this.setRegister('di', (di + delta) & 0xffff);
+                    this.setRegister('si', (si + delta));
+                    this.setRegister('di', (di + delta));
                     // CX减1
-                    this.setRegister('cx', (cx - 1) & 0xffff);
+                    this.setRegister('cx', (cx - 1));
                     // 如果CX不为0，重复执行REP MOVSB
                     if (this.getRegister('cx') !== 0) {
                         instructionLength = 0; // 不增加IP，重复执行
@@ -1986,9 +1985,9 @@ CPU8086.prototype.step = function() {
                     const value = this.readMemory16(src);
                     this.writeMemory16(dst, value);
                     const delta = this.flags.df ? -2 : 2;
-                    this.setRegister('si', (si + delta) & 0xffff);
-                    this.setRegister('di', (di + delta) & 0xffff);
-                    this.setRegister('cx', (cx - 1) & 0xffff);
+                    this.setRegister('si', (si + delta));
+                    this.setRegister('di', (di + delta));
+                    this.setRegister('cx', (cx - 1));
                     if (this.getRegister('cx') !== 0) {
                         instructionLength = 0;
                     } else {
@@ -2012,8 +2011,8 @@ CPU8086.prototype.step = function() {
             const value = this.readMemory8(src);
             this.writeMemory8(dst, value);
             const delta = this.flags.df ? -1 : 1;
-            this.setRegister('si', (si + delta) & 0xffff);
-            this.setRegister('di', (di + delta) & 0xffff);
+            this.setRegister('si', (si + delta));
+            this.setRegister('di', (di + delta));
             instructionLength = 1;
             break;
         }
@@ -2027,8 +2026,8 @@ CPU8086.prototype.step = function() {
             const value = this.readMemory16(src);
             this.writeMemory16(dst, value);
             const delta = this.flags.df ? -2 : 2;
-            this.setRegister('si', (si + delta) & 0xffff);
-            this.setRegister('di', (di + delta) & 0xffff);
+            this.setRegister('si', (si + delta));
+            this.setRegister('di', (di + delta));
             instructionLength = 1;
             break;
         }
@@ -2039,7 +2038,7 @@ CPU8086.prototype.step = function() {
             const al = this.getRegister('ax') & 0xff;
             this.writeMemory8(dst, al);
             const delta = this.flags.df ? -1 : 1;
-            this.setRegister('di', (di + delta) & 0xffff);
+            this.setRegister('di', (di + delta));
             instructionLength = 1;
             break;
         }
@@ -2050,7 +2049,7 @@ CPU8086.prototype.step = function() {
             const ax = this.getRegister('ax');
             this.writeMemory16(dst, ax);
             const delta = this.flags.df ? -2 : 2;
-            this.setRegister('di', (di + delta) & 0xffff);
+            this.setRegister('di', (di + delta));
             instructionLength = 1;
             break;
         }
@@ -2062,7 +2061,7 @@ CPU8086.prototype.step = function() {
             const ax = this.getRegister('ax');
             this.setRegister('ax', (ax & 0xff00) | value);
             const delta = this.flags.df ? -1 : 1;
-            this.setRegister('si', (si + delta) & 0xffff);
+            this.setRegister('si', (si + delta));
             instructionLength = 1;
             break;
         }
@@ -2073,7 +2072,7 @@ CPU8086.prototype.step = function() {
             const value = this.readMemory16(src);
             this.setRegister('ax', value);
             const delta = this.flags.df ? -2 : 2;
-            this.setRegister('si', (si + delta) & 0xffff);
+            this.setRegister('si', (si + delta));
             instructionLength = 1;
             break;
         }
@@ -2086,7 +2085,7 @@ CPU8086.prototype.step = function() {
             const result = al - mem;
             this.updateFlags8(result, al, mem, 'sub');
             const delta = this.flags.df ? -1 : 1;
-            this.setRegister('di', (di + delta) & 0xffff);
+            this.setRegister('di', (di + delta));
             instructionLength = 1;
             break;
         }
@@ -2099,7 +2098,7 @@ CPU8086.prototype.step = function() {
             const result = ax - mem;
             this.updateFlags16(result, ax, mem, 'sub');
             const delta = this.flags.df ? -2 : 2;
-            this.setRegister('di', (di + delta) & 0xffff);
+            this.setRegister('di', (di + delta));
             instructionLength = 1;
             break;
         }
@@ -2115,8 +2114,8 @@ CPU8086.prototype.step = function() {
             const result = left - right;
             this.updateFlags8(result, left, right, 'sub');
             const delta = this.flags.df ? -1 : 1;
-            this.setRegister('si', (si + delta) & 0xffff);
-            this.setRegister('di', (di + delta) & 0xffff);
+            this.setRegister('si', (si + delta));
+            this.setRegister('di', (di + delta));
             instructionLength = 1;
             break;
         }
@@ -2132,8 +2131,8 @@ CPU8086.prototype.step = function() {
             const result = left - right;
             this.updateFlags16(result, left, right, 'sub');
             const delta = this.flags.df ? -2 : 2;
-            this.setRegister('si', (si + delta) & 0xffff);
-            this.setRegister('di', (di + delta) & 0xffff);
+            this.setRegister('si', (si + delta));
+            this.setRegister('di', (di + delta));
             instructionLength = 1;
             break;
         }
@@ -2148,7 +2147,6 @@ CPU8086.prototype.step = function() {
             this.writeMemory16(stackAddr, returnAddr);
             // 跳转到目标地址：当前IP + 指令长度 + 偏移量
             this.ip = this.ip + 3 + signedOffsetCall;
-            this.ip &= 0xffff;
             instructionLength = 0; // 不增加IP，因为已经手动设置了
             break;
         case 0x70: // JO short
@@ -2156,7 +2154,7 @@ CPU8086.prototype.step = function() {
                 const off = this.readMemory8(currentAddress + 1);
                 const s = off > 0x7f ? off - 0x100 : off;
                 if (this.flags.of) {
-                    this.ip = (this.ip + 2 + s) & 0xffff;
+                    this.ip = (this.ip + 2 + s);
                     instructionLength = 0;
                 } else {
                     instructionLength = 2;
@@ -2168,7 +2166,7 @@ CPU8086.prototype.step = function() {
                 const off = this.readMemory8(currentAddress + 1);
                 const s = off > 0x7f ? off - 0x100 : off;
                 if (!this.flags.of) {
-                    this.ip = (this.ip + 2 + s) & 0xffff;
+                    this.ip = (this.ip + 2 + s);
                     instructionLength = 0;
                 } else {
                     instructionLength = 2;
@@ -2180,7 +2178,7 @@ CPU8086.prototype.step = function() {
                 const off = this.readMemory8(currentAddress + 1);
                 const s = off > 0x7f ? off - 0x100 : off;
                 if (this.flags.cf) {
-                    this.ip = (this.ip + 2 + s) & 0xffff;
+                    this.ip = (this.ip + 2 + s);
                     instructionLength = 0;
                 } else {
                     instructionLength = 2;
@@ -2192,7 +2190,7 @@ CPU8086.prototype.step = function() {
                 const off = this.readMemory8(currentAddress + 1);
                 const s = off > 0x7f ? off - 0x100 : off;
                 if (!this.flags.cf) {
-                    this.ip = (this.ip + 2 + s) & 0xffff;
+                    this.ip = (this.ip + 2 + s);
                     instructionLength = 0;
                 } else {
                     instructionLength = 2;
@@ -2206,7 +2204,6 @@ CPU8086.prototype.step = function() {
                 const signedOffsetJz = offset8jz > 0x7f ? offset8jz - 0x100 : offset8jz;
                 // 跳转到目标地址：当前IP + 指令长度 + 偏移量
                 this.ip = this.ip + 2 + signedOffsetJz;
-                this.ip &= 0xffff;
                 instructionLength = 0; // 不增加IP，因为已经手动设置了
             } else {
                 instructionLength = 2;
@@ -2218,7 +2215,6 @@ CPU8086.prototype.step = function() {
             if (!this.flags.zf) {
                 // ZF=0 时跳转
                 this.ip = this.ip + 2 + signedOffset75;
-                this.ip &= 0xffff;
                 instructionLength = 0;
             } else {
                 instructionLength = 2;
@@ -2229,7 +2225,7 @@ CPU8086.prototype.step = function() {
                 const off = this.readMemory8(currentAddress + 1);
                 const s = off > 0x7f ? off - 0x100 : off;
                 if (this.flags.cf || this.flags.zf) {
-                    this.ip = (this.ip + 2 + s) & 0xffff;
+                    this.ip = (this.ip + 2 + s);
                     instructionLength = 0;
                 } else {
                     instructionLength = 2;
@@ -2241,7 +2237,7 @@ CPU8086.prototype.step = function() {
                 const off = this.readMemory8(currentAddress + 1);
                 const s = off > 0x7f ? off - 0x100 : off;
                 if (!this.flags.cf && !this.flags.zf) {
-                    this.ip = (this.ip + 2 + s) & 0xffff;
+                    this.ip = (this.ip + 2 + s);
                     instructionLength = 0;
                 } else {
                     instructionLength = 2;
@@ -2253,7 +2249,7 @@ CPU8086.prototype.step = function() {
                 const off = this.readMemory8(currentAddress + 1);
                 const s = off > 0x7f ? off - 0x100 : off;
                 if (this.flags.sf) {
-                    this.ip = (this.ip + 2 + s) & 0xffff;
+                    this.ip = (this.ip + 2 + s);
                     instructionLength = 0;
                 } else {
                     instructionLength = 2;
@@ -2265,7 +2261,7 @@ CPU8086.prototype.step = function() {
                 const off = this.readMemory8(currentAddress + 1);
                 const s = off > 0x7f ? off - 0x100 : off;
                 if (!this.flags.sf) {
-                    this.ip = (this.ip + 2 + s) & 0xffff;
+                    this.ip = (this.ip + 2 + s);
                     instructionLength = 0;
                 } else {
                     instructionLength = 2;
@@ -2277,7 +2273,7 @@ CPU8086.prototype.step = function() {
                 const off = this.readMemory8(currentAddress + 1);
                 const s = off > 0x7f ? off - 0x100 : off;
                 if (this.flags.pf) {
-                    this.ip = (this.ip + 2 + s) & 0xffff;
+                    this.ip = (this.ip + 2 + s);
                     instructionLength = 0;
                 } else {
                     instructionLength = 2;
@@ -2289,7 +2285,7 @@ CPU8086.prototype.step = function() {
                 const off = this.readMemory8(currentAddress + 1);
                 const s = off > 0x7f ? off - 0x100 : off;
                 if (!this.flags.pf) {
-                    this.ip = (this.ip + 2 + s) & 0xffff;
+                    this.ip = (this.ip + 2 + s);
                     instructionLength = 0;
                 } else {
                     instructionLength = 2;
@@ -2401,10 +2397,10 @@ CPU8086.prototype.step = function() {
                 const off = this.readMemory8(currentAddress + 1);
                 const s = off > 0x7f ? off - 0x100 : off;
                 const cx = this.getRegister('cx');
-                const newCx = (cx - 1) & 0xffff;
+                const newCx = (cx - 1);
                 this.setRegister('cx', newCx);
                 if (newCx !== 0 && this.flags.zf === 0) {
-                    this.ip = (this.ip + 2 + s) & 0xffff;
+                    this.ip = (this.ip + 2 + s);
                     instructionLength = 0;
                 } else {
                     instructionLength = 2;
@@ -2416,10 +2412,10 @@ CPU8086.prototype.step = function() {
                 const off = this.readMemory8(currentAddress + 1);
                 const s = off > 0x7f ? off - 0x100 : off;
                 const cx = this.getRegister('cx');
-                const newCx = (cx - 1) & 0xffff;
+                const newCx = (cx - 1);
                 this.setRegister('cx', newCx);
                 if (newCx !== 0 && this.flags.zf === 1) {
-                    this.ip = (this.ip + 2 + s) & 0xffff;
+                    this.ip = (this.ip + 2 + s);
                     instructionLength = 0;
                 } else {
                     instructionLength = 2;
@@ -2431,10 +2427,10 @@ CPU8086.prototype.step = function() {
                 const off = this.readMemory8(currentAddress + 1);
                 const s = off > 0x7f ? off - 0x100 : off;
                 const cx = this.getRegister('cx');
-                const newCx = (cx - 1) & 0xffff;
+                const newCx = (cx - 1);
                 this.setRegister('cx', newCx);
                 if (newCx !== 0) {
-                    this.ip = (this.ip + 2 + s) & 0xffff;
+                    this.ip = (this.ip + 2 + s);
                     instructionLength = 0;
                 } else {
                     instructionLength = 2;
@@ -2446,7 +2442,7 @@ CPU8086.prototype.step = function() {
                 const off = this.readMemory8(currentAddress + 1);
                 const s = off > 0x7f ? off - 0x100 : off;
                 if (this.getRegister('cx') === 0) {
-                    this.ip = (this.ip + 2 + s) & 0xffff;
+                    this.ip = (this.ip + 2 + s);
                     instructionLength = 0;
                 } else {
                     instructionLength = 2;
@@ -2459,7 +2455,7 @@ CPU8086.prototype.step = function() {
             const signedOffset = offset8 > 0x7f ? offset8 - 0x100 : offset8;
             // 跳转到目标地址：当前IP + 指令长度(2) + 偏移量
             // 注意：this.ip当前指向本条指令，所以直接加上指令长度和偏移量
-            this.ip = (this.ip + 2 + signedOffset) & 0xffff;
+            this.ip = (this.ip + 2 + signedOffset);
             instructionLength = 0; // 不增加IP，因为已经手动设置了
             break;
         case 0xe9: // JMP near
@@ -2467,7 +2463,7 @@ CPU8086.prototype.step = function() {
             // 符号扩展（16位有符号数）
             const signedOffset16 = offset16jmp > 0x7fff ? offset16jmp - 0x10000 : offset16jmp;
             // 跳转到目标地址：当前IP + 指令长度(3) + 偏移量
-            this.ip = (this.ip + 3 + signedOffset16) & 0xffff;
+            this.ip = (this.ip + 3 + signedOffset16);
             instructionLength = 0; // 不增加IP，因为已经手动设置了
             break;
         case 0x7c: // JL short
@@ -2478,7 +2474,6 @@ CPU8086.prototype.step = function() {
                 const signedOffsetJl = offset8jl > 0x7f ? offset8jl - 0x100 : offset8jl;
                 // 跳转到目标地址：当前IP + 指令长度 + 偏移量
                 this.ip = this.ip + 2 + signedOffsetJl;
-                this.ip &= 0xffff;
                 instructionLength = 0; // 不增加IP，因为已经手动设置了
             } else {
                 instructionLength = 2;
@@ -2492,7 +2487,6 @@ CPU8086.prototype.step = function() {
                 const signedOffsetJge = offset8jge > 0x7f ? offset8jge - 0x100 : offset8jge;
                 // 跳转到目标地址：当前IP + 指令长度 + 偏移量
                 this.ip = this.ip + 2 + signedOffsetJge;
-                this.ip &= 0xffff;
                 instructionLength = 0; // 不增加IP，因为已经手动设置了
             } else {
                 instructionLength = 2;
@@ -2506,7 +2500,6 @@ CPU8086.prototype.step = function() {
                 const signedOffsetJle = offset8jle > 0x7f ? offset8jle - 0x100 : offset8jle;
                 // 跳转到目标地址：当前IP + 指令长度 + 偏移量
                 this.ip = this.ip + 2 + signedOffsetJle;
-                this.ip &= 0xffff;
                 instructionLength = 0; // 不增加IP，因为已经手动设置了
             } else {
                 instructionLength = 2;
@@ -2520,7 +2513,6 @@ CPU8086.prototype.step = function() {
                 const signedOffsetJg = offset8jg > 0x7f ? offset8jg - 0x100 : offset8jg;
                 // 跳转到目标地址：当前IP + 指令长度 + 偏移量
                 this.ip = this.ip + 2 + signedOffsetJg;
-                this.ip &= 0xffff;
                 instructionLength = 0; // 不增加IP，因为已经手动设置了
             } else {
                 instructionLength = 2;
@@ -2575,7 +2567,7 @@ CPU8086.prototype.step = function() {
 
                 // 设置标志位（CMP不设置目标寄存器）
                 if (reg81 !== 7) {
-                    this.setRegister(destReg, result & 0xffff);
+                    this.setRegister(destReg, result);
                 }
                 // 根据操作类型设置标志位
                 let operation = 'add';
@@ -2986,7 +2978,6 @@ CPU8086.prototype.step = function() {
     // 更新指令指针（某些指令已经设置了IP，instructionLength会设为0）
     if (instructionLength > 0) {
         this.ip += instructionLength;
-        this.ip &= 0xffff; // 确保16位
     }
 
     return true;
