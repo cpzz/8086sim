@@ -1128,31 +1128,9 @@ CPU8086.prototype.step = function() {
             break;
         case 0xcd: // INT imm8
             const interruptNum = this.readMemory8(currentAddress + 1);
-
             // 调用对应的中断处理程序
             this.handleInterrupt(interruptNum);
-            /*
-            if (interruptNum === 0x21) {
-                // INT 21h - DOS功能调用
-                const result21 = this.handleInt21();
-                if (!result21) {
-                    return false; // 暂停执行（如等待输入）
-                }
-                // handler已经更新了IP，不需要再增加
-                instructionLength = 0;
-            } else if (interruptNum === 0x16) {
-                // INT 16h - BIOS键盘服务
-                const result16 = this.handleInt16();
-                if (!result16) {
-                    return false; // 暂停执行（如等待输入）
-                }
-                // handler已经更新了IP，不需要再增加
-                instructionLength = 0;
-            } else {
-                // 其他中断，简单处理
-                instructionLength = 2;
-            }
-            */
+            instructionLength = 2;
             break;
         case 0x40: // INC AX
         case 0x41: // INC CX

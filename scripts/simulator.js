@@ -298,12 +298,6 @@ function checkIfAtEnd() {
     const lastInstruction = instructions[instructions.length - 1];
     const lastAddress = lastInstruction.address + lastInstruction.length - 1;
 
-    // 打印日志
-    console.log('checkIfAtEnd - cpu.ip:', cpu.ip.toString(16), 
-                'lastInstruction.address:', lastInstruction.address.toString(16), 
-                'lastInstruction.length:', lastInstruction.length,
-                'lastAddress:', lastAddress.toString(16));
-
     // 检查当前IP是否超过了最后一条指令的地址
     if (cpu.ip > lastAddress) {
         isAtEnd = true;

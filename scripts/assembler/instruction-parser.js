@@ -760,27 +760,9 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     }
                 }
                 if (labelDataVar) {
-                    // 查找标签地址
-                    let labelOffset = null;
-                    for (const key in this.symbols) {
-                        if (key.toLowerCase() === op1Lower) {
-                            labelOffset = this.symbols[key];
-                            break;
-                        }
-                    }
-                    if (labelOffset !== null) {
-                        // MOV r8, [disp16] - 8A 0E disp16 (小端序)
-                        const reg = reg8Map[operands[0]];
-                        const modRM = (0 << 6) | (reg << 3) | 6; // mod=00, reg=寄存器, rm=110 (直接寻址)
-                        return {
-                            address,
-                            opcode: 'MOV',
-                            operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
-                            machineCode: [0x8a, modRM, labelOffset & 0xff, (labelOffset >> 8) & 0xff],
-                            length: 4,
-                            originalLine: originalLine.trim()
-                        };
-                    }
+                    // 8位寄存器不能直接加载16位地址，应该使用MOV r16, label格式
+                    // 或者使用LEA指令
+                    throw new Error(`Invalid instruction: Cannot load 16-bit address into 8-bit register ${operands[0]}. Use MOV ${operands[0].replace(/[lh]$/, 'x')}, ${operands[1]} or LEA ${operands[0].replace(/[lh]$/, 'x')}, ${operands[1]}`);
                 }
             }
 
@@ -806,15 +788,16 @@ Assembler.prototype.parseInstruction = function(line, address) {
                         }
                     }
                     if (labelOffset !== null) {
-                        // MOV r16, [disp16] - 8B 0E disp16 (小端序)
+                        // 正确的处理：MOV r16, imm16 - 将标签地址作为立即数加载到寄存器
+                        // 使用 B8 + reg 操作码（例如：MOV AX, imm16 -> B8, MOV DX, imm16 -> BA）
                         const reg = reg16Map[operands[0]];
-                        const modRM = (0 << 6) | (reg << 3) | 6; // mod=00, reg=寄存器, rm=110 (直接寻址)
+                        const opcode = 0xb8 + reg; // B8+0=AX, B8+1=CX, B8+2=DX, B8+3=BX, 等等
                         return {
                             address,
                             opcode: 'MOV',
                             operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
-                            machineCode: [0x8b, modRM, labelOffset & 0xff, (labelOffset >> 8) & 0xff],
-                            length: 4,
+                            machineCode: [opcode, labelOffset & 0xff, (labelOffset >> 8) & 0xff],
+                            length: 3,
                             originalLine: originalLine.trim()
                         };
                     }

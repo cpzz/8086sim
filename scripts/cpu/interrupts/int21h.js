@@ -32,8 +32,6 @@ CPU8086.prototype.int21AH01KeyboardInput = function() {
         if (this.updateOutputDisplay) {
             this.updateOutputDisplay();
         }
-        this.ip += 2;
-        this.ip &= 0xffff;
         return true;
     } else {
         if (this.waitForKeyPress && !this.waitingForKey) {
@@ -57,8 +55,6 @@ CPU8086.prototype.int21AH02DisplayChar = function() {
     if (this.updateOutputDisplay) {
         this.updateOutputDisplay();
     }
-    this.ip += 2;
-    this.ip &= 0xffff;
     return true;
 };
 
@@ -105,8 +101,6 @@ CPU8086.prototype.int21AH06DirectConsoleIO = function() {
             this.updateOutputDisplay();
         }
     }
-    this.ip += 2;
-    this.ip &= 0xffff;
     return true;
 };
 
@@ -114,8 +108,6 @@ CPU8086.prototype.int21AH07DirectInputNoEcho = function() {
     if (this.keyboardBuffer.length > 0) {
         const key = this.keyboardBuffer.shift();
         this.setRegister('ax', (this.getRegister('ax') & 0xff00) | key);
-        this.ip += 2;
-        this.ip &= 0xffff;
         return true;
     } else {
         if (this.waitForKeyPress && !this.waitingForKey) {
@@ -145,8 +137,6 @@ CPU8086.prototype.int21AH09DisplayString = function() {
     if (this.updateOutputDisplay) {
         this.updateOutputDisplay();
     }
-    this.ip += 2;
-    this.ip &= 0xffff;
     return true;
 };
 
@@ -188,8 +178,6 @@ CPU8086.prototype.int21AH0AStringInput = function() {
             this.updateOutputDisplay();
         }
 
-        this.ip += 2;
-        this.ip &= 0xffff;
         return true;
     } else {
         if (this.waitForKeyPress && !this.waitingForKey) {
@@ -208,7 +196,5 @@ CPU8086.prototype.int21AH0AStringInput = function() {
 
 CPU8086.prototype.int21AH4CExit = function() {
     this.running = false;
-    this.ip = 0xffff;
-    this.ip &= 0xffff;
     return false;
 };

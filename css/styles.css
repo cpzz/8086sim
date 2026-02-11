@@ -796,12 +796,13 @@ table.register-table td.register-changed {
 
 .instructions-table-cell.label-address {
     color: #0066cc;
-    font-weight: bold;
+    font-weight: normal;
+    font-style: normal; /* 取消斜体，与其他指令行保持一致 */
 }
 
 .instructions-table-cell.label-assembly {
     color: #0066cc;
-    font-weight: bold;
+    font-weight: normal;
     font-style: italic;
 }
 
