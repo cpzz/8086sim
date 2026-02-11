@@ -92,29 +92,44 @@ CPU8086.prototype.setFlag = function(name, value) {
 };
 
 CPU8086.prototype.getFlags = function() {
-    return {
-        cf: this.flags.cf,
-        pf: this.flags.pf,
-        af: this.flags.af,
-        zf: this.flags.zf,
-        sf: this.flags.sf,
-        tf: this.flags.tf,
-        if: this.flags.if,
-        df: this.flags.df,
-        of: this.flags.of
-    };
+    let flags = 0;
+
+    flags |= (this.flags.cf & 1) << 0;
+    flags |= 1 << 1;
+    flags |= (this.flags.pf & 1) << 2;
+    flags |= (this.flags.af & 1) << 4;
+    flags |= (this.flags.zf & 1) << 6;
+    flags |= (this.flags.sf & 1) << 7;
+    flags |= (this.flags.tf & 1) << 8;
+    flags |= (this.flags.if & 1) << 9;
+    flags |= (this.flags.df & 1) << 10;
+    flags |= (this.flags.of & 1) << 11;
+
+    return flags & 0xffff;
 };
 
 CPU8086.prototype.setFlags = function(flags) {
-    if (flags.cf !== undefined) this.flags.cf = flags.cf ? 1 : 0;
-    if (flags.pf !== undefined) this.flags.pf = flags.pf ? 1 : 0;
-    if (flags.af !== undefined) this.flags.af = flags.af ? 1 : 0;
-    if (flags.zf !== undefined) this.flags.zf = flags.zf ? 1 : 0;
-    if (flags.sf !== undefined) this.flags.sf = flags.sf ? 1 : 0;
-    if (flags.tf !== undefined) this.flags.tf = flags.tf ? 1 : 0;
-    if (flags.if !== undefined) this.flags.if = flags.if ? 1 : 0;
-    if (flags.df !== undefined) this.flags.df = flags.df ? 1 : 0;
-    if (flags.of !== undefined) this.flags.of = flags.of ? 1 : 0;
+    if (typeof flags === 'object') {
+        if (flags.cf !== undefined) this.flags.cf = flags.cf ? 1 : 0;
+        if (flags.pf !== undefined) this.flags.pf = flags.pf ? 1 : 0;
+        if (flags.af !== undefined) this.flags.af = flags.af ? 1 : 0;
+        if (flags.zf !== undefined) this.flags.zf = flags.zf ? 1 : 0;
+        if (flags.sf !== undefined) this.flags.sf = flags.sf ? 1 : 0;
+        if (flags.tf !== undefined) this.flags.tf = flags.tf ? 1 : 0;
+        if (flags.if !== undefined) this.flags.if = flags.if ? 1 : 0;
+        if (flags.df !== undefined) this.flags.df = flags.df ? 1 : 0;
+        if (flags.of !== undefined) this.flags.of = flags.of ? 1 : 0;
+    } else {
+        this.flags.cf = (flags >> 0) & 1;
+        this.flags.pf = (flags >> 2) & 1;
+        this.flags.af = (flags >> 4) & 1;
+        this.flags.zf = (flags >> 6) & 1;
+        this.flags.sf = (flags >> 7) & 1;
+        this.flags.tf = (flags >> 8) & 1;
+        this.flags.if = (flags >> 9) & 1;
+        this.flags.df = (flags >> 10) & 1;
+        this.flags.of = (flags >> 11) & 1;
+    }
 };
 
 CPU8086.prototype.getLowByte = function(reg) {

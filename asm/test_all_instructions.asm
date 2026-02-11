@@ -33,6 +33,7 @@ MAIN PROC
     ; MOV指令测试
     MOV AX, 1234h                ; AX = 1234h
     MOV BX, AX                   ; BX = 1234h
+    MOV AX, 1234h                ; AX = 1234h
     MOV CX, [WORD_VAL]           ; CX = 1234h
     MOV [BUFFER], AL             ; BUFFER[0] = 34h
     
@@ -48,8 +49,11 @@ MAIN PROC
     POP DX                       ; DX = 1234h, 栈: 空
     
     ; PUSHF/POPF指令测试
+    MOV CX, FFFFh
     PUSHF                        ; 标志寄存器入栈
+    PUSH CX                      ; 栈: [FFFFh]
     POPF                         ; 标志寄存器出栈
+    ;POPF                         ; 标志寄存器出栈
     
     ; LEA指令测试
     LEA SI, STRING               ; SI = STRING的偏移地址

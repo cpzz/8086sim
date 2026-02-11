@@ -293,10 +293,10 @@ function updateInstructionsDisplay() {
         }
 
         // 如果不是伪指令、数据段定义或标签，则是指令
-        // 查找对应的指令
+        // 查找对应的指令（使用lineIndex匹配，而不是originalLine）
         let foundInstruction = null;
         for (const instruction of instructions) {
-            if (instruction.originalLine && instruction.originalLine.trim() === trimmedLine) {
+            if (instruction.lineIndex === currentLineIndex) {
                 foundInstruction = instruction;
                 break;
             }
