@@ -45,6 +45,31 @@ Assembler.prototype.getInstructionLength = function(line) {
         return 0; // EVEN 不占用空间，只是对齐
     }
 
+    // 处理 PROC 伪指令（如 "myProc PROC" 或 "myProc PROC NEAR"）
+    if (/\bproc\b/i.test(lineWithoutComment)) {
+        return 0; // PROC 不占用空间
+    }
+
+    // 处理 ENDP 伪指令
+    if (/\bendp\b/i.test(lineWithoutComment)) {
+        return 0; // ENDP 不占用空间
+    }
+
+    // 处理 LABEL 伪指令（如 "myLabel LABEL BYTE"）
+    if (/^\w+\s+label\s+(byte|word|dword|qword|tbyte|near|far)/i.test(lineWithoutComment)) {
+        return 0; // LABEL 不占用空间
+    }
+
+    // 处理 EQU 常量定义
+    if (lineWithoutComment.toLowerCase().includes(' equ ')) {
+        return 0; // EQU 不占用空间
+    }
+
+    // 处理等号赋值（如 "count = 100"）
+    if (/^\w+\s*=\s*.+$/.test(lineWithoutComment)) {
+        return 0; // 等号赋值不占用空间
+    }
+
     const opcodeEndIndex = lineWithoutComment.indexOf(' ');
     const opcode = opcodeEndIndex === -1 ? lineWithoutComment.toLowerCase() : lineWithoutComment.substring(0, opcodeEndIndex).toLowerCase();
     const operandsPart = opcodeEndIndex === -1 ? '' : lineWithoutComment.substring(opcodeEndIndex).trim();
@@ -291,19 +316,19 @@ Assembler.prototype.getInstructionLength = function(line) {
         case 'mov':
             // 使用最坏情况长度策略
             if (this.isImmediate(operands[1])) {
-                // 立即数操作：一律使用16位立即数长度
+                // 立即数操作
                 if (operands[0].includes('[')) {
                     // 内存寻址 + 立即数：最坏情况6字节
-                    return 6;
-                } else if (!['ax', 'bx', 'cx', 'dx', 'si', 'di', 'al', 'ah', 'bl', 'bh', 'cl', 'ch', 'dl', 'dh'].includes(operands[0])) {
-                    // 标签 + 立即数：最坏情况6字节
                     return 6;
                 } else if (['ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'].includes(operands[0])) {
                     // 16位寄存器 + 立即数：3字节
                     return 3;
-                } else {
+                } else if (['al', 'ah', 'bl', 'bh', 'cl', 'ch', 'dl', 'dh'].includes(operands[0])) {
                     // 8位寄存器 + 立即数：2字节
                     return 2;
+                } else {
+                    // 标签 + 立即数：最坏情况6字节
+                    return 6;
                 }
             }
             // 检查是否是从数据段变量加载数据（例如 MOV DL, SINGLE_TOP_LEFT）

@@ -749,6 +749,7 @@ Assembler.prototype.parseInstruction = function(line, address) {
             }
 
             // 处理 MOV r8, label 格式，其中 label 是数据段中的变量
+            // MASM 语法: MOV DL, LABEL 从内存加载字节值，而不是加载地址
             if (reg8Map.hasOwnProperty(operands[0]) && !memOp0 && !memOp1) {
                 // 检查第二个操作数是否是数据段中的变量
                 const op1Lower = operands[1].toLowerCase();
@@ -760,9 +761,29 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     }
                 }
                 if (labelDataVar) {
-                    // 8位寄存器不能直接加载16位地址，应该使用MOV r16, label格式
-                    // 或者使用LEA指令
-                    throw new Error(`Invalid instruction: Cannot load 16-bit address into 8-bit register ${operands[0]}. Use MOV ${operands[0].replace(/[lh]$/, 'x')}, ${operands[1]} or LEA ${operands[0].replace(/[lh]$/, 'x')}, ${operands[1]}`);
+                    // 查找标签地址
+                    let labelOffset = null;
+                    for (const key in this.symbols) {
+                        if (key.toLowerCase() === op1Lower) {
+                            labelOffset = this.symbols[key];
+                            break;
+                        }
+                    }
+                    if (labelOffset !== null) {
+                        // MOV r8, [offset] - 从内存加载字节到8位寄存器
+                        // 操作码: 8A /r (MOV r8, r/m8)
+                        // ModR/M: mod=00 (直接地址), reg=目标寄存器, rm=110 (直接寻址)
+                        const reg = reg8Map[operands[0]];
+                        const modRM = (0 << 6) | (reg << 3) | 0x06; // mod=0, rm=110 (直接寻址)
+                        return {
+                            address,
+                            opcode: 'MOV',
+                            operands: [operands[0].toUpperCase(), `[${labelDataVar}]`],
+                            machineCode: [0x8a, modRM, labelOffset & 0xff, (labelOffset >> 8) & 0xff],
+                            length: 4,
+                            originalLine: originalLine.trim()
+                        };
+                    }
                 }
             }
 
@@ -3933,6 +3954,34 @@ Assembler.prototype.parseInstruction = function(line, address) {
                 };
             }
             break;
+    }
+
+    // 检查是否是伪指令（不生成机器码）
+    const lowerLine = line.toLowerCase();
+
+    // LABEL 伪指令（如 "name LABEL BYTE"）
+    if (/^\w+\s+label\s+(byte|word|dword|qword|tbyte|near|far)/i.test(line)) {
+        return null;
+    }
+
+    // PROC 伪指令（如 "name PROC" 或 "name PROC NEAR"）
+    if (/\bproc\b/i.test(line)) {
+        return null;
+    }
+
+    // ENDP 伪指令
+    if (/\bendp\b/i.test(line)) {
+        return null;
+    }
+
+    // EQU 常量定义
+    if (lowerLine.includes(' equ ')) {
+        return null;
+    }
+
+    // 等号赋值（如 "count = 10"）
+    if (/^\w+\s*=\s*.+$/.test(line)) {
+        return null;
     }
 
     // 未知指令

@@ -337,17 +337,16 @@ class Assembler {
 
             // 检查是否是 PROC 伪指令
             // 支持多种格式：proc_name PROC, proc_name proc, proc_name PROC NEAR, proc_name PROC FAR
+            // PROC 语义上等同于纯标签，应该指向下一条指令的地址
             const procMatch = line.toLowerCase().match(/\bproc\b/i);
             if (procMatch && procMatch.index > 0) {
                 const procIndex = procMatch.index;
                 // 提取标签名称
                 const potentialLabel = line.substring(0, procIndex).trim();
                 if (potentialLabel && !potentialLabel.startsWith(';')) {
-                    // PROC标签的地址应该是PROC后的第一条指令地址
-                    // 由于PROC行本身不占用空间，地址保持不变
-                    this.symbols[potentialLabel] = address;
+                    // PROC标签和纯标签一样，记录为 forward，等待后续地址修正
+                    this.symbols[potentialLabel] = { type: 'forward', lineIndex: i, initialAddr: address };
                     this.symbolOriginalCase[potentialLabel.toLowerCase()] = potentialLabel; // 保存原始大小写
-                    // 记录PROC标签的地址
                 }
                 // proc伪指令本身不占用空间
                 continue;
@@ -381,55 +380,48 @@ class Assembler {
                 continue;
             }
 
+            // 检查是否是纯标签行（冒号结尾，且后面没有指令）
             if (line.endsWith(':')) {
-                // 检查是否是纯标签行
-                let hasInstruction = false;
                 const colonIndex = line.indexOf(':');
-                if (colonIndex < line.length - 1) {
-                    const instructionPart = line.substring(colonIndex + 1).trim();
-                    if (instructionPart !== '') {
-                        hasInstruction = true;
-                    }
-                }
-
-                if (!hasInstruction) {
-                    // 纯标签行：记录下一条指令的地址（当前address就是下一条指令的地址）
+                const instructionPart = line.substring(colonIndex + 1).trim();
+                if (instructionPart === '') {
+                    // 纯标签行：记录当前地址，不增加地址
                     lineAddresses[i] = address;
+                    continue;
+                }
+            }
+
+            // 处理 EVEN 伪指令 - 需要根据当前地址对齐
+            const lowerLineForEven = line.split(';')[0].trim().toLowerCase();
+            if (lowerLineForEven === 'even') {
+                if (address % 2 !== 0) {
+                    address++; // 对齐到偶地址
                 }
                 continue;
             }
 
-            // 跳过 PROC 和 ENDP 伪指令
-            const parts = line.split(/\s+/).filter(Boolean);
-            const firstWord = parts.length > 0 ? parts[0].toLowerCase() : '';
-            const secondWord = parts.length > 1 ? parts[1].toLowerCase() : '';
-            if (firstWord === 'proc' || secondWord === 'proc' ||
-                firstWord === 'endp' || secondWord === 'endp') {
+            // 处理 ORG 伪指令 - 设置新地址
+            if (lowerLineForEven.startsWith('org ')) {
+                const orgValue = line.substring(4).trim();
+                const newAddress = this.parseImmediate(orgValue);
+                if (!isNaN(newAddress)) {
+                    address = newAddress;
+                }
                 continue;
             }
 
-            // 跳过 EQU 常量定义
-            if (line.toLowerCase().includes(' equ ')) {
-                continue;
-            }
-
-            // 跳过等号赋值
-            const equalMatch = line.match(/^(\w+)\s*=\s*(.+)$/);
-            if (equalMatch && !line.toLowerCase().includes(' equ ')) {
-                continue;
-            }
-
-            // 记录这条指令的地址
+            // 所有其他指令（包括伪指令）都统一处理：
+            // 记录地址，然后根据 getInstructionLength() 增加地址
             lineAddresses[i] = address;
-
-            address += this.getInstructionLength(line);
+            const instrLen = this.getInstructionLength(line);
+            address += instrLen;
         }
 
         // 更新纯标签行的地址为下一条指令的地址
         for (const label in this.symbols) {
             if (typeof this.symbols[label] === 'object' && this.symbols[label].type === 'forward') {
                 const lineIndex = this.symbols[label].lineIndex;
-                // 查找下一条指令的地址（跳过标签行本身）
+                // 查找下一条指令的地址（跳过标签行本身和伪指令行）
                 let foundAddr = undefined;
                 for (let i = lineIndex + 1; i < lines.length; i++) {
                     const nextLine = lines[i].trim();
@@ -445,6 +437,20 @@ class Assembler {
                             continue; // 纯标签行，继续查找
                         }
                     }
+                    // 跳过伪指令行（PROC、ENDP、EQU、LABEL、等号赋值）
+                    const lowerNextLine = nextLine.toLowerCase();
+                    if (/\bproc\b/i.test(nextLine) || /\bendp\b/i.test(nextLine)) {
+                        continue;
+                    }
+                    if (/^\w+\s+label\s+(byte|word|dword|qword|tbyte|near|far)/i.test(nextLine)) {
+                        continue;
+                    }
+                    if (lowerNextLine.includes(' equ ')) {
+                        continue;
+                    }
+                    if (/^\w+\s*=\s*.+$/.test(nextLine)) {
+                        continue;
+                    }
                     // 找到真正的指令行
                     if (lineAddresses[i] !== undefined) {
                         foundAddr = lineAddresses[i];
@@ -457,6 +463,8 @@ class Assembler {
                     if (!this.symbolOriginalCase[label.toLowerCase()]) {
                         this.symbolOriginalCase[label.toLowerCase()] = label; // 保存原始大小写
                     }
+                } else {
+                    console.warn(`[地址修正警告] ${label} 未找到下一条指令地址`);
                 }
             }
         }
@@ -489,19 +497,7 @@ class Assembler {
             }
 
             if (line.endsWith(':')) {
-                // 跳过标签行
-                continue;
-            }
-
-            // 跳过 PROC 和 ENDP 伪指令
-            // 只匹配独立的 proc/endp 指令（不在字符串、注释或其他指令中）
-            const parts = line.split(/\s+/).filter(Boolean);
-            const firstWord = parts.length > 0 ? parts[0].toLowerCase() : '';
-            const secondWord = parts.length > 1 ? parts[1].toLowerCase() : '';
-            const isProcLine = firstWord === 'proc' || secondWord === 'proc';
-            const isEndpLine = firstWord === 'endp' || secondWord === 'endp';
-
-            if (isProcLine || isEndpLine) {
+                // 跳过标签行（不生成机器码）
                 continue;
             }
 
@@ -687,25 +683,7 @@ class Assembler {
                     // 数据段的填充已经在第一遍添加到 dataSegments 中
                     address++;
                 }
-                continue; // 跳过，不生成其他指令
-            }
-
-            // 检查是否是 LABEL 伪指令（第二遍跳过，已在第一遍处理）
-            const labelMatch2 = line.match(/^(\w+)\s+label\s+(byte|word|dword|qword|tbyte|near|far)/i);
-            if (labelMatch2) {
                 continue;
-            }
-
-            // 检查是否是 = (等号赋值) 伪指令（第二遍跳过，已在第一遍处理）
-            const equalMatch2 = line.match(/^(\w+)\s*=\s*(.+)$/);
-            if (equalMatch2 && !line.toLowerCase().includes(' equ ')) {
-                continue;
-            }
-
-            // 检查是否是 EQU 常量定义（第二遍跳过，已在第一遍处理）
-            const equIndex = line.toLowerCase().indexOf(' equ ');
-            if (equIndex !== -1 && equIndex > 0) {
-                continue; // EQU已在第一遍处理，不占用空间
             }
 
             // 在代码段中，跳过数据定义（它们已经在第一遍扫描时处理并写入数据段）
@@ -730,7 +708,8 @@ class Assembler {
                 }
             }
 
-            // 解析指令
+            // 解析指令（包括 PROC、ENDP、EQU、LABEL 等伪指令）
+            // parseInstruction 会返回 null 对于不生成机器码的伪指令
             const instruction = this.parseInstruction(line, address);
             if (instruction) {
                 instruction.lineIndex = i;
@@ -738,10 +717,35 @@ class Assembler {
                 // 写入内存
                 this.writeInstructionToMemory(instruction);
                 address += instruction.length;
+            } else {
+                // 对于不生成机器码的伪指令
+                const len = this.getInstructionLength(line);
+
+                // PROC 伪指令：更新 symbols 表中的地址
+                const procMatch = line.toLowerCase().match(/\bproc\b/i);
+                if (procMatch && procMatch.index > 0) {
+                    const procIndex = procMatch.index;
+                    const potentialLabel = line.substring(0, procIndex).trim();
+                    if (potentialLabel && !potentialLabel.startsWith(';')) {
+                        // 更新 symbols 表，PROC 的地址是下一条指令的地址（当前 address）
+                        this.symbols[potentialLabel] = address;
+                    }
+                }
+
+                // 纯标签行：更新 symbols 表中的地址
+                if (line.endsWith(':')) {
+                    const colonIndex = line.indexOf(':');
+                    const potentialLabel = line.substring(0, colonIndex).trim();
+                    if (potentialLabel) {
+                        this.symbols[potentialLabel] = address;
+                    }
+                }
+
+                address += len;
             }
         }
 
-        // 在所有指令处理完成后，修正跳转指令的偏移量
+        // 第三遍：修正跳转指令的偏移量（使用 symbols 表）
         this.fixJumpOffsets();
 
         return this.instructions;

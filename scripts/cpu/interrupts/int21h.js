@@ -196,5 +196,7 @@ CPU8086.prototype.int21AH0AStringInput = function() {
 
 CPU8086.prototype.int21AH4CExit = function() {
     this.running = false;
+    // exit program, set IP to 0xFFFF to prevent further execution
+    this.ip = 0xffff;
     return false;
 };

@@ -2945,7 +2945,10 @@ CPU8086.prototype.step = function() {
             instructionLength = 2;
             break;
         }
-        
+        case 0xf4: // HLT - Halt
+            this.running = false;
+            return false;
+
         default:
             // 所有未实现的指令都报非法指令错误
             console.error(`执行错误: 遇到非法指令 0x${opcode.toString(16).padStart(2, '0')}`);
