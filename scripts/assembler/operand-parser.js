@@ -9,7 +9,13 @@ Assembler.prototype.parseImmediate = function(value) {
     const valueLower = value.toLowerCase();
     for (const key in this.symbols) {
         if (key.toLowerCase() === valueLower) {
-            return this.symbols[key];
+            const symbolValue = this.symbols[key];
+            // 处理前进引用的标签（type: 'forward'）
+            if (typeof symbolValue === 'object' && symbolValue.type === 'forward') {
+                // 前进引用尚未解析，返回 0（稍后会在 fixJumpOffsets 中修正）
+                return 0;
+            }
+            return symbolValue;
         }
     }
 

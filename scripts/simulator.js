@@ -230,7 +230,9 @@ function pauseExecution() {
 
 // 重置模拟器
 function resetSimulator() {
-    // 不清除内存，保留垃圾数据
+    // 清空内存
+    memory.clear();
+    
     cpu.reset();
     breakpoints.clear();
 
@@ -259,10 +261,21 @@ function resetSimulator() {
 
     // 清空输出缓冲区（清屏）
     cpu.outputBuffer = '';
+    
+    // 清空屏幕缓冲区
+    if (typeof screenBuffer !== 'undefined') {
+        screenBuffer = [];
+        screenCursorLine = 0;
+        screenCursorCol = 0;
+        processedLength = 0;
+    }
 
-    // 如果有指令，设置IP为入口点
+    // 如果有指令，重新写入代码段和数据段到内存
     if (instructions.length > 0) {
-        // 如果汇编器指定了入口点（如 end main），则使用入口点
+        assembler.writeCodeSegmentToMemory(cpu);
+        assembler.writeDataSegmentToMemory(cpu);
+        
+        // 设置IP为入口点
         if (assembler.entryPoint && assembler.symbols.hasOwnProperty(assembler.entryPoint)) {
             cpu.ip = assembler.symbols[assembler.entryPoint];
         } else {
@@ -319,9 +332,6 @@ function handleFileLoad(e) {
             // 重置CPU（包括寄存器和标志位）
             cpu.reset();
 
-            // 清空所有段内存
-            clearAllMemory();
-
             // 重置状态变量
             hasExecuted = false;
             isAtEnd = false;
@@ -346,8 +356,9 @@ function handleFileLoad(e) {
                 shouldScrollToCurrent = true;
             }
 
-            // 初始化不同段的内存值
-            initializeSegmentMemory();
+            // 写入代码段和数据段到内存
+            assembler.writeCodeSegmentToMemory(cpu);
+            assembler.writeDataSegmentToMemory(cpu);
 
             // 清空输出缓冲区（清屏）
             cpu.outputBuffer = '';

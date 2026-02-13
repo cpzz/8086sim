@@ -1110,6 +1110,24 @@ CPU8086.prototype.step = function() {
                 instructionLength = 1;
             }
             break;
+        case 0xc2: // RET imm16 (near return with pop of imm16 bytes)
+            {
+                const imm16 = this.readMemory16(currentAddress + 1);
+                const currentSP = this.getRegister('sp');
+                if (currentSP === 0xfffe) {
+                    // 没有调用过函数，执行完最后一条指令
+                    return false;
+                } else {
+                    // 从堆栈弹出返回地址
+                    const returnAddress = this.readMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), currentSP));
+                    // SP = SP + 2 (弹出返回地址) + imm16 (清除参数)
+                    this.setRegister('sp', currentSP + 2 + imm16);
+                    this.ip = returnAddress;
+                }
+                // 对于RET指令，不需要再增加IP，因为已经设置了returnAddress
+                instructionLength = 0;
+            }
+            break;
         case 0xc3: // RET
             const currentSP = this.getRegister('sp');
             if (currentSP === 0xfffe) {
@@ -1194,6 +1212,72 @@ CPU8086.prototype.step = function() {
             this.flags.if = 1;
             instructionLength = 1;
             break;
+        case 0x84: { // TEST r/m8, r8
+            const modrm84 = this.readMemory8(currentAddress + 1);
+            const reg84 = (modrm84 >> 3) & 0x7;
+            const mod84 = (modrm84 >> 6) & 0x3;
+            const rm84 = modrm84 & 0x7;
+            
+            const reg8Map84 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
+            const reg16ToName84 = ['ax', 'cx', 'dx', 'bx', 'ax', 'cx', 'dx', 'bx'];
+            const isHigh84 = [false, false, false, false, true, true, true, true];
+            
+            let op1, op2;
+            
+            if (mod84 === 3) {
+                // 寄存器模式
+                const base1 = reg16ToName84[rm84];
+                const full1 = this.getRegister(base1);
+                op1 = isHigh84[rm84] ? ((full1 >> 8) & 0xff) : (full1 & 0xff);
+                
+                const base2 = reg16ToName84[reg84];
+                const full2 = this.getRegister(base2);
+                op2 = isHigh84[reg84] ? ((full2 >> 8) & 0xff) : (full2 & 0xff);
+                
+                instructionLength = 2;
+            } else {
+                // 内存模式
+                const ea = this.calculateEffectiveAddress(mod84, rm84, currentAddress);
+                op1 = this.readMemory8(ea.address);
+                
+                const base2 = reg16ToName84[reg84];
+                const full2 = this.getRegister(base2);
+                op2 = isHigh84[reg84] ? ((full2 >> 8) & 0xff) : (full2 & 0xff);
+                
+                instructionLength = 2 + ea.displacementSize;
+            }
+            
+            const result84 = op1 & op2;
+            this.updateFlags8(result84, op1, op2, 'and');
+            break;
+        }
+        case 0x85: { // TEST r/m16, r16
+            const modrm85 = this.readMemory8(currentAddress + 1);
+            const reg85 = (modrm85 >> 3) & 0x7;
+            const mod85 = (modrm85 >> 6) & 0x3;
+            const rm85 = modrm85 & 0x7;
+            
+            const rmToName85 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+            
+            let op1, op2;
+            
+            if (mod85 === 3) {
+                // 寄存器模式
+                op1 = this.getRegister(rmToName85[rm85]);
+                op2 = this.getRegister(rmToName85[reg85]);
+                instructionLength = 2;
+            } else {
+                // 内存模式
+                const ea = this.calculateEffectiveAddress(mod85, rm85, currentAddress);
+                op1 = this.readMemory16(ea.address);
+                op2 = this.getRegister(rmToName85[reg85]);
+                instructionLength = 2 + ea.displacementSize;
+            }
+            
+            const result85 = op1 & op2;
+            this.updateFlags16(result85, op1, op2, 'and');
+            break;
+        }
         case 0xa8: // TEST AL, Ib
             {
                 const imm = this.readMemory8(currentAddress + 1);
@@ -1644,34 +1728,61 @@ CPU8086.prototype.step = function() {
             const reg = (modrm >> 3) & 0x7;
             const mod = (modrm >> 6) & 0x3;
             const rm  = modrm & 0x7;
-            if (mod !== 3) {
-                console.error(`执行错误: 不支持的寻址模式 mod=${mod}`);
-                this.running = false;
-                return false;
+            
+            let op8;
+            let memAddr = null;
+            
+            if (mod === 3) {
+                // 寄存器模式
+                const regToName8 = ['ax','cx','dx','bx','ax','cx','dx','bx'];
+                const isHigh     = [false,false,false,false,true,true,true,true];
+                const base = regToName8[rm];
+                const full = this.getRegister(base);
+                op8 = isHigh[rm] ? ((full >> 8) & 0xff) : (full & 0xff);
+            } else {
+                // 内存模式
+                const ea = this.calculateEffectiveAddress(mod, rm, currentAddress);
+                memAddr = ea.address;
+                op8 = this.readMemory8(memAddr);
             }
-            const regToName8 = ['ax','cx','dx','bx','ax','cx','dx','bx'];
-            const isHigh     = [false,false,false,false,true,true,true,true];
-            const base = regToName8[rm];
-            let full = this.getRegister(base);
-            let op8  = isHigh[rm] ? ((full >> 8) & 0xff) : (full & 0xff);
 
             switch (reg) {
                 case 2: { // NOT
                     const r = (~op8) & 0xff;
-                    full = isHigh[rm] ? ((full & 0x00ff) | (r << 8))
-                                        : ((full & 0xff00) | r);
-                    this.setRegister(base, full);
-                    instructionLength = 2;
+                    if (mod === 3) {
+                        const regToName8 = ['ax','cx','dx','bx','ax','cx','dx','bx'];
+                        const isHigh     = [false,false,false,false,true,true,true,true];
+                        const base = regToName8[rm];
+                        const full = this.getRegister(base);
+                        const newFull = isHigh[rm] ? ((full & 0x00ff) | (r << 8))
+                                            : ((full & 0xff00) | r);
+                        this.setRegister(base, newFull);
+                        instructionLength = 2;
+                    } else {
+                        this.writeMemory8(memAddr, r);
+                        const ea = this.calculateEffectiveAddress(mod, rm, currentAddress);
+                        instructionLength = 2 + ea.displacementSize;
+                    }
                     break;
                 }
                 case 3: { // NEG
                     const r = (-op8) & 0xff;
-                    full = isHigh[rm] ? ((full & 0x00ff) | (r << 8))
-                                        : ((full & 0xff00) | r);
-                    this.setRegister(base, full);
+                    if (mod === 3) {
+                        const regToName8 = ['ax','cx','dx','bx','ax','cx','dx','bx'];
+                        const isHigh     = [false,false,false,false,true,true,true,true];
+                        const base = regToName8[rm];
+                        const full = this.getRegister(base);
+                        const newFull = isHigh[rm] ? ((full & 0x00ff) | (r << 8))
+                                            : ((full & 0xff00) | r);
+                        this.setRegister(base, newFull);
+                        instructionLength = 2;
+                    } else {
+                        this.writeMemory8(memAddr, r);
+                        const ea = this.calculateEffectiveAddress(mod, rm, currentAddress);
+                        instructionLength = 2 + ea.displacementSize;
+                    }
                     this.updateFlags8(r, 0, op8, 'sub');
                     this.flags.cf = op8 !== 0 ? 1 : 0;
-                    instructionLength = 2;
                     break;
                 }
                 case 4: { // MUL (AL * r/m8 -> AX)
@@ -1681,7 +1792,12 @@ CPU8086.prototype.step = function() {
                     this.setRegister('ax', ax);
                     const ah = (ax >> 8) & 0xff;
                     this.flags.cf = this.flags.of = ah !== 0 ? 1 : 0;
-                    instructionLength = 2;
+                    if (mod === 3) {
+                        instructionLength = 2;
+                    } else {
+                        const ea = this.calculateEffectiveAddress(mod, rm, currentAddress);
+                        instructionLength = 2 + ea.displacementSize;
+                    }
                     break;
                 }
                 case 5: { // IMUL
@@ -1692,7 +1808,12 @@ CPU8086.prototype.step = function() {
                     const prod = al * b;
                     this.setRegister('ax', prod);
                     this.flags.cf = this.flags.of = (prod < -128 || prod > 127) ? 1 : 0;
-                    instructionLength = 2;
+                    if (mod === 3) {
+                        instructionLength = 2;
+                    } else {
+                        const ea = this.calculateEffectiveAddress(mod, rm, currentAddress);
+                        instructionLength = 2 + ea.displacementSize;
+                    }
                     break;
                 }
                 case 6: { // DIV
@@ -1706,7 +1827,12 @@ CPU8086.prototype.step = function() {
                     const q = Math.floor(ax / d) & 0xff;
                     const r = (ax % d) & 0xff;
                     this.setRegister('ax', (r << 8) | q);
-                    instructionLength = 2;
+                    if (mod === 3) {
+                        instructionLength = 2;
+                    } else {
+                        const ea = this.calculateEffectiveAddress(mod, rm, currentAddress);
+                        instructionLength = 2 + ea.displacementSize;
+                    }
                     break;
                 }
                 case 7: { // IDIV
@@ -1729,7 +1855,12 @@ CPU8086.prototype.step = function() {
                     const al = q & 0xff;
                     const ah = r & 0xff;
                     this.setRegister('ax', (ah << 8) | al);
-                    instructionLength = 2;
+                    if (mod === 3) {
+                        instructionLength = 2;
+                    } else {
+                        const ea = this.calculateEffectiveAddress(mod, rm, currentAddress);
+                        instructionLength = 2 + ea.displacementSize;
+                    }
                     break;
                 }
                 default:
@@ -1744,28 +1875,51 @@ CPU8086.prototype.step = function() {
             const reg = (modrm >> 3) & 0x7;
             const mod = (modrm >> 6) & 0x3;
             const rm  = modrm & 0x7;
-            if (mod !== 3) {
-                console.error(`执行错误: 不支持的寻址模式 mod=${mod}`);
-                this.running = false;
-                return false;
+            
+            let op16;
+            let memAddr16 = null;
+            
+            if (mod === 3) {
+                // 寄存器模式
+                const rmToName = ['ax','cx','dx','bx','sp','bp','si','di'];
+                const base = rmToName[rm];
+                op16 = this.getRegister(base);
+            } else {
+                // 内存模式
+                const ea = this.calculateEffectiveAddress(mod, rm, currentAddress);
+                memAddr16 = ea.address;
+                op16 = this.readMemory16(memAddr16);
             }
-            const rmToName = ['ax','cx','dx','bx','sp','bp','si','di'];
-            const base = rmToName[rm];
-            let op16 = this.getRegister(base);
 
             switch (reg) {
                 case 2: { // NOT
-                    const r = (~op16);
-                    this.setRegister(base, r);
-                    instructionLength = 2;
+                    const r = (~op16) & 0xffff;
+                    if (mod === 3) {
+                        const rmToName = ['ax','cx','dx','bx','sp','bp','si','di'];
+                        const base = rmToName[rm];
+                        this.setRegister(base, r);
+                        instructionLength = 2;
+                    } else {
+                        this.writeMemory16(memAddr16, r);
+                        const ea = this.calculateEffectiveAddress(mod, rm, currentAddress);
+                        instructionLength = 2 + ea.displacementSize;
+                    }
                     break;
                 }
                 case 3: { // NEG
-                    const r = (-op16);
-                    this.setRegister(base, r);
+                    const r = (-op16) & 0xffff;
+                    if (mod === 3) {
+                        const rmToName = ['ax','cx','dx','bx','sp','bp','si','di'];
+                        const base = rmToName[rm];
+                        this.setRegister(base, r);
+                        instructionLength = 2;
+                    } else {
+                        this.writeMemory16(memAddr16, r);
+                        const ea = this.calculateEffectiveAddress(mod, rm, currentAddress);
+                        instructionLength = 2 + ea.displacementSize;
+                    }
                     this.updateFlags16(r, 0, op16, 'sub');
                     this.flags.cf = op16 !== 0 ? 1 : 0;
-                    instructionLength = 2;
                     break;
                 }
                 case 4: { // MUL (AX * r/m16 -> DX:AX)
@@ -1776,7 +1930,12 @@ CPU8086.prototype.step = function() {
                     this.setRegister('ax', axr);
                     this.setRegister('dx', dxr);
                     this.flags.cf = this.flags.of = dxr !== 0 ? 1 : 0;
-                    instructionLength = 2;
+                    if (mod === 3) {
+                        instructionLength = 2;
+                    } else {
+                        const ea = this.calculateEffectiveAddress(mod, rm, currentAddress);
+                        instructionLength = 2 + ea.displacementSize;
+                    }
                     break;
                 }
                 case 5: { // IMUL
@@ -1790,7 +1949,12 @@ CPU8086.prototype.step = function() {
                     this.setRegister('ax', axr);
                     this.setRegister('dx', dxr);
                     this.flags.cf = this.flags.of = (prod < -32768 || prod > 32767) ? 1 : 0;
-                    instructionLength = 2;
+                    if (mod === 3) {
+                        instructionLength = 2;
+                    } else {
+                        const ea = this.calculateEffectiveAddress(mod, rm, currentAddress);
+                        instructionLength = 2 + ea.displacementSize;
+                    }
                     break;
                 }
                 case 6: { // DIV (DX:AX / r/m16)
@@ -1807,7 +1971,12 @@ CPU8086.prototype.step = function() {
                     const r = dividend % d;
                     this.setRegister('ax', q);
                     this.setRegister('dx', r);
-                    instructionLength = 2;
+                    if (mod === 3) {
+                        instructionLength = 2;
+                    } else {
+                        const ea = this.calculateEffectiveAddress(mod, rm, currentAddress);
+                        instructionLength = 2 + ea.displacementSize;
+                    }
                     break;
                 }
                 case 7: { // IDIV (有符号 DX:AX / r/m16)
@@ -1831,7 +2000,12 @@ CPU8086.prototype.step = function() {
                     const r = dividend - q * d;
                     this.setRegister('ax', q);
                     this.setRegister('dx', r);
-                    instructionLength = 2;
+                    if (mod === 3) {
+                        instructionLength = 2;
+                    } else {
+                        const ea = this.calculateEffectiveAddress(mod, rm, currentAddress);
+                        instructionLength = 2 + ea.displacementSize;
+                    }
                     break;
                 }
                 default:
@@ -2886,35 +3060,49 @@ CPU8086.prototype.step = function() {
             const mod = (modrm >> 6) & 0x3;
             const rm  = modrm & 0x7;
             
-            if (mod !== 3) {
-                console.error(`执行错误: 0xFE 不支持的寻址模式 mod=${mod}`);
-                this.running = false;
-                return false;
-            }
+            let op8, newOp8;
             
-            // 8位寄存器映射: rm=0->AL, 1->CL, 2->DL, 3->BL, 4->AH, 5->CH, 6->DH, 7->BH
-            // 16位寄存器映射: AX, CX, DX, BX (低8位 AL,CL,DL,BL; 高8位 AH,CH,DH,BH)
-            const reg16ToName = ['ax', 'cx', 'dx', 'bx', 'ax', 'cx', 'dx', 'bx'];
-            const parentReg = reg16ToName[rm];
-            const isHigh = rm >= 4;
-            
-            const full = this.getRegister(parentReg);
-            let op8 = isHigh ? ((full >> 8) & 0xff) : (full & 0xff);
-            
-            let newOp8;
-            if (reg === 0) { // INC
-                newOp8 = (op8 + 1) & 0xff;
-            } else if (reg === 1) { // DEC
-                newOp8 = (op8 - 1) & 0xff;
+            if (mod === 3) {
+                // 寄存器模式
+                const reg16ToName = ['ax', 'cx', 'dx', 'bx', 'ax', 'cx', 'dx', 'bx'];
+                const parentReg = reg16ToName[rm];
+                const isHigh = rm >= 4;
+                
+                const full = this.getRegister(parentReg);
+                op8 = isHigh ? ((full >> 8) & 0xff) : (full & 0xff);
+                
+                if (reg === 0) { // INC
+                    newOp8 = (op8 + 1) & 0xff;
+                } else if (reg === 1) { // DEC
+                    newOp8 = (op8 - 1) & 0xff;
+                } else {
+                    console.error(`执行错误: 0xFE 不支持的扩展操作码 ${reg}`);
+                    this.running = false;
+                    return false;
+                }
+                
+                const newFull = isHigh ? ((full & 0x00ff) | (newOp8 << 8)) : ((full & 0xff00) | newOp8);
+                this.setRegister(parentReg, newFull);
+                instructionLength = 2;
             } else {
-                console.error(`执行错误: 0xFE 不支持的扩展操作码 ${reg}`);
-                this.running = false;
-                return false;
+                // 内存模式
+                const ea = this.calculateEffectiveAddress(mod, rm, currentAddress);
+                const memAddr = ea.address;
+                op8 = this.readMemory8(memAddr);
+                
+                if (reg === 0) { // INC
+                    newOp8 = (op8 + 1) & 0xff;
+                } else if (reg === 1) { // DEC
+                    newOp8 = (op8 - 1) & 0xff;
+                } else {
+                    console.error(`执行错误: 0xFE 不支持的扩展操作码 ${reg}`);
+                    this.running = false;
+                    return false;
+                }
+                
+                this.writeMemory8(memAddr, newOp8);
+                instructionLength = 2 + ea.displacementSize;
             }
-            
-            // 更新寄存器
-            const newFull = isHigh ? ((full & 0x00ff) | (newOp8 << 8)) : ((full & 0xff00) | newOp8);
-            this.setRegister(parentReg, newFull);
             
             // 更新标志位
             this.flags.zf = (newOp8 === 0) ? 1 : 0;
@@ -2937,12 +3125,83 @@ CPU8086.prototype.step = function() {
             
             // 溢出标志
             if (reg === 0) { // INC
-                this.flags.of = (op8 === 0x7f) ? 1 : 0; // 从 0x7F 到 0x80 (127 to -128)
+                this.flags.of = (op8 === 0x7f) ? 1 : 0;
             } else { // DEC
-                this.flags.of = (op8 === 0x80) ? 1 : 0; // 从 0x80 到 0x7F (-128 to 127)
+                this.flags.of = (op8 === 0x80) ? 1 : 0;
             }
             
-            instructionLength = 2;
+            break;
+        }
+        case 0xFF: { // INC/DEC/CALL/JMP r/m16 (Group 5)
+            const modrm = this.readMemory8(currentAddress + 1);
+            const reg = (modrm >> 3) & 0x7;  // Extension opcode
+            const mod = (modrm >> 6) & 0x3;
+            const rm  = modrm & 0x7;
+            
+            let op16, newOp16;
+            
+            if (reg === 0 || reg === 1) { // INC or DEC
+                if (mod === 3) {
+                    // 寄存器模式
+                    const reg16ToName = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+                    const regName = reg16ToName[rm];
+                    op16 = this.getRegister(regName);
+                    
+                    if (reg === 0) { // INC
+                        newOp16 = (op16 + 1) & 0xffff;
+                    } else { // DEC
+                        newOp16 = (op16 - 1) & 0xffff;
+                    }
+                    
+                    this.setRegister(regName, newOp16);
+                    instructionLength = 2;
+                } else {
+                    // 内存模式
+                    const ea = this.calculateEffectiveAddress(mod, rm, currentAddress);
+                    const memAddr = ea.address;
+                    op16 = this.readMemory16(memAddr);
+                    
+                    if (reg === 0) { // INC
+                        newOp16 = (op16 + 1) & 0xffff;
+                    } else { // DEC
+                        newOp16 = (op16 - 1) & 0xffff;
+                    }
+                    
+                    this.writeMemory16(memAddr, newOp16);
+                    instructionLength = 2 + ea.displacementSize;
+                }
+                
+                // 更新标志位
+                this.flags.zf = (newOp16 === 0) ? 1 : 0;
+                this.flags.sf = (newOp16 & 0x8000) ? 1 : 0;
+                // 计算奇偶标志（基于低8位）
+                let parity = 0;
+                let value = newOp16 & 0xff;
+                for (let i = 0; i < 8; i++) {
+                    parity += value & 1;
+                    value >>= 1;
+                }
+                this.flags.pf = (parity % 2 === 0) ? 1 : 0;
+                
+                // 辅助进位标志（低4位溢出）
+                if (reg === 0) { // INC
+                    this.flags.af = ((op16 & 0x0f) === 0x0f) ? 1 : 0;
+                } else { // DEC
+                    this.flags.af = ((op16 & 0x0f) === 0) ? 1 : 0;
+                }
+                
+                // 溢出标志
+                if (reg === 0) { // INC
+                    this.flags.of = (op16 === 0x7fff) ? 1 : 0;
+                } else { // DEC
+                    this.flags.of = (op16 === 0x8000) ? 1 : 0;
+                }
+            } else {
+                console.error(`执行错误: 0xFF 暂不支持扩展操作码 ${reg}`);
+                this.running = false;
+                return false;
+            }
+            
             break;
         }
         case 0xf4: // HLT - Halt

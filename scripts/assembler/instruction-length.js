@@ -314,6 +314,9 @@ Assembler.prototype.getInstructionLength = function(line) {
             // 默认情况：保守估计2字节
             return 2;
         case 'mov':
+            // 检查是否使用了 offset 操作符
+            const hasOffset = /\boffset\s+/i.test(operandsPart);
+            
             // 使用最坏情况长度策略
             if (this.isImmediate(operands[1])) {
                 // 立即数操作
@@ -343,9 +346,9 @@ Assembler.prototype.getInstructionLength = function(line) {
                                     (['al', 'ah', 'bl', 'bh', 'cl', 'ch', 'dl', 'dh', 'ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'].includes(operands[1].toLowerCase()));
                     
                     if ((isDestReg8 || isDestReg16) && !isRegToReg) {
-                        // 如果不是寄存器到寄存器，很可能是MOV reg, label格式
-                        // MOV reg, label - 这种指令通常为4字节（对于8位寄存器）或3-4字节（对于16位寄存器）
-                        return isDestReg8 ? 4 : 3; // 8位寄存器：4字节；16位寄存器：3字节
+                        // 如果使用了 OFFSET，是立即数加载（3字节）
+                        // 否则是从内存读取（4字节）
+                        return hasOffset ? 3 : 4;
                     }
                 }
             // 内存寻址操作：最坏情况4字节

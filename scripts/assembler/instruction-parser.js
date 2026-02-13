@@ -19,6 +19,10 @@ Assembler.prototype.parseInstruction = function(line, address) {
     const hasBytePtr = /\bbyte\s+ptr\s+/i.test(operandsPart);
     const hasWordPtr = /\bword\s+ptr\s+/i.test(operandsPart);
 
+    // 检测是否使用了 offset 操作符
+    const offsetMatch = operandsPart.match(/\boffset\s+(\w+)/i);
+    const hasOffset = !!offsetMatch;
+    
     // 处理 offset 操作符：将 "offset label" 转换为 "label"
     let operandsPartProcessed = operandsPart.replace(/\boffset\s+/gi, '');
     // 处理 byte ptr 和 word ptr 操作符
@@ -542,7 +546,11 @@ Assembler.prototype.parseInstruction = function(line, address) {
                 };
             }
             break;
-        case 'mov':
+        case 'mov': {
+            // Define register maps for the entire MOV case
+            const reg16Map = { 'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3, 'sp': 4, 'bp': 5, 'si': 6, 'di': 7 };
+            const reg8Map = { 'al': 0, 'cl': 1, 'dl': 2, 'bl': 3, 'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7 };
+            
             if (operands[0] === 'ax' && operands[1] === 'bx') {
                 // MOV AX, BX - mod=11, reg=000(AX), rm=011(BX)
                 return {
@@ -586,10 +594,6 @@ Assembler.prototype.parseInstruction = function(line, address) {
                 };
             }
             // 支持8位寄存器到寄存器的MOV指令
-            const reg8Map = {
-                'al': 0, 'cl': 1, 'dl': 2, 'bl': 3,
-                'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7
-            };
             if (reg8Map.hasOwnProperty(operands[0]) && reg8Map.hasOwnProperty(operands[1])) {
                 const dstReg = reg8Map[operands[0]];
                 const srcReg = reg8Map[operands[1]];
@@ -708,9 +712,6 @@ Assembler.prototype.parseInstruction = function(line, address) {
 
             // 16位寄存器到内存: MOV [mem], reg16
             if (memOp0 && !memOp1) {
-                const reg16Map = { 'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3, 'sp': 4, 'bp': 5, 'si': 6, 'di': 7 };
-                const reg8Map = { 'al': 0, 'cl': 1, 'dl': 2, 'bl': 3, 'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7 };
-
                 if (reg16Map.hasOwnProperty(operands[1])) {
                     // MOV [mem], r16 - 操作码89
                     const reg = reg16Map[operands[1]];
@@ -787,8 +788,9 @@ Assembler.prototype.parseInstruction = function(line, address) {
                 }
             }
 
-            // 处理 MOV r16, label 格式，其中 label 是数据段中的变量
-            const reg16Map = { 'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3, 'sp': 4, 'bp': 5, 'si': 6, 'di': 7 };
+            // 处理 MOV r16, label 格式
+            // 如果使用了 OFFSET，加载地址（立即数）
+            // 否则，对于数据变量，从内存读取值
             if (reg16Map.hasOwnProperty(operands[0]) && !memOp0 && !memOp1) {
                 // 检查第二个操作数是否是数据段中的变量
                 const op1Lower = operands[1].toLowerCase();
@@ -809,18 +811,35 @@ Assembler.prototype.parseInstruction = function(line, address) {
                         }
                     }
                     if (labelOffset !== null) {
-                        // 正确的处理：MOV r16, imm16 - 将标签地址作为立即数加载到寄存器
-                        // 使用 B8 + reg 操作码（例如：MOV AX, imm16 -> B8, MOV DX, imm16 -> BA）
-                        const reg = reg16Map[operands[0]];
-                        const opcode = 0xb8 + reg; // B8+0=AX, B8+1=CX, B8+2=DX, B8+3=BX, 等等
-                        return {
-                            address,
-                            opcode: 'MOV',
-                            operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
-                            machineCode: [opcode, labelOffset & 0xff, (labelOffset >> 8) & 0xff],
-                            length: 3,
-                            originalLine: originalLine.trim()
-                        };
+                        if (hasOffset) {
+                            // MOV r16, OFFSET label - 将地址作为立即数加载
+                            // 使用 B8 + reg 操作码
+                            const reg = reg16Map[operands[0]];
+                            const opcode = 0xb8 + reg;
+                            return {
+                                address,
+                                opcode: 'MOV',
+                                operands: [operands[0].toUpperCase(), 'OFFSET ' + operands[1].toUpperCase()],
+                                machineCode: [opcode, labelOffset & 0xff, (labelOffset >> 8) & 0xff],
+                                length: 3,
+                                originalLine: originalLine.trim()
+                            };
+                        } else {
+                            // MOV r16, label - 从内存读取值（使用直接寻址）
+                            // 操作码: 8B, ModR/M: mod=00 reg=目标寄存器 r/m=110(直接寻址)
+                            const reg = reg16Map[operands[0]];
+                            const modRM = (0 << 6) | (reg << 3) | 6;
+                            return {
+                                address,
+                                opcode: 'MOV',
+                                operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                                machineCode: [0x8b, modRM, labelOffset & 0xff, (labelOffset >> 8) & 0xff],
+                                length: 4,
+                                originalLine: originalLine.trim(),
+                                hasLabel: true,
+                                labelName: labelDataVar
+                            };
+                        }
                     }
                     }
             }
@@ -1464,6 +1483,7 @@ Assembler.prototype.parseInstruction = function(line, address) {
                 }
             }
             break;
+        }
         case 'ret':
             if (operands.length === 0) {
                 // RET (近返回) - 1字节
@@ -1517,7 +1537,7 @@ Assembler.prototype.parseInstruction = function(line, address) {
                 }
             }
             break;
-        case 'shr':
+        case 'shr': {
             // 处理 SHR r/m, 1 指令
             if (operands[1] === '1') {
                 const regMap = {
@@ -1583,6 +1603,7 @@ Assembler.prototype.parseInstruction = function(line, address) {
                 }
             }
             break;
+        }
         case 'push':
             if (operands[0] === 'ax') {
                 return {
@@ -1806,13 +1827,13 @@ Assembler.prototype.parseInstruction = function(line, address) {
         case 'call':
             if (operands.length === 1) {
                 // CALL NEAR 或 默认 - 3字节
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 const offset = targetAddress - (address + 3);
                 const offset16 = offset & 0xffff;
                 return {
                     address,
                     opcode: 'CALL',
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0xe8, offset16 & 0xff, (offset16 >> 8) & 0xff],
                     length,
                     originalLine: 'CALL'
@@ -1820,12 +1841,12 @@ Assembler.prototype.parseInstruction = function(line, address) {
             }
             // 处理 CALL FAR label 格式
             if (operands.length === 2 && operands[0] === 'far') {
-                const targetAddress = this.parseImmediate(operands[1]);
+                const targetAddress = this.parseImmediate(originalOperands[1]);
                 // CALL far (9A) - 段地址:偏移地址
                 return {
                     address,
                     opcode: 'CALL',
-                    operands: ['FAR', operands[1]],
+                    operands: ['FAR', originalOperands[1]],
                     machineCode: [0x9a, targetAddress & 0xff, (targetAddress >> 8) & 0xff, 0x00, 0x00], // 简化处理，段地址设为0
                     length,
                     originalLine: 'CALL FAR'
@@ -1835,13 +1856,13 @@ Assembler.prototype.parseInstruction = function(line, address) {
         case 'jmp':
             if (operands.length === 1) {
                 // JMP NEAR 或 默认 - 3字节
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 const offset = targetAddress - (address + 3);
                 const offset16 = offset & 0xffff;
                 return {
                     address,
                     opcode: 'JMP',
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0xe9, offset16 & 0xff, (offset16 >> 8) & 0xff],
                     length,
                     originalLine: 'JMP'
@@ -1849,14 +1870,14 @@ Assembler.prototype.parseInstruction = function(line, address) {
             }
             // 处理 JMP SHORT label 格式
             if (operands.length === 2 && operands[0] === 'short') {
-                const targetAddress = this.parseImmediate(operands[1]);
+                const targetAddress = this.parseImmediate(originalOperands[1]);
                 const offset = targetAddress - (address + 2);
                 // JMP short (EB)
                 const offset8 = offset & 0xff;
                 return {
                     address,
                     opcode: 'JMP',
-                    operands: ['SHORT', operands[1]],
+                    operands: ['SHORT', originalOperands[1]],
                     machineCode: [0xeb, offset8],
                     length,
                     originalLine: 'JMP SHORT'
@@ -1879,7 +1900,7 @@ Assembler.prototype.parseInstruction = function(line, address) {
         case 'jz':
         case 'je':
             if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 // JZ/JE short 的偏移量 = 目标地址 - (当前地址 + 指令长度)
                 const offset = targetAddress - (address + 2);
                 // 将偏移量转换为有符号的8位整数
@@ -1887,7 +1908,7 @@ Assembler.prototype.parseInstruction = function(line, address) {
                 return {
                     address,
                     opcode: opcode === 'jz' ? 'JZ' : 'JE',
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0x74, offset8],
                     length,
                     originalLine: opcode === 'jz' ? 'JZ' : 'JE'
@@ -1897,7 +1918,7 @@ Assembler.prototype.parseInstruction = function(line, address) {
         case 'jnz':
         case 'jne':
             if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 // JNZ/JNE short 的偏移量 = 目标地址 - (当前地址 + 指令长度)
                 const offset = targetAddress - (address + 2);
                 // 将偏移量转换为有符号的8位整数
@@ -1905,7 +1926,7 @@ Assembler.prototype.parseInstruction = function(line, address) {
                 return {
                     address,
                     opcode: opcode === 'jnz' ? 'JNZ' : 'JNE',
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0x75, offset8],
                     length,
                     originalLine: opcode === 'jnz' ? 'JNZ' : 'JNE'
@@ -2241,6 +2262,54 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     originalLine: originalLine.trim()
                 };
             }
+            
+            // 支持内存操作数的 INC 指令
+            // INC word ptr [mem] / INC [mem] / INC label
+            // 尝试解析为内存操作数或直接地址
+            const operand = operands[0];
+            let isWordPtr = false;
+            let isBytePtr = false;
+            let actualOperand = operand;
+            
+            // 检查是否有 word ptr 或 byte ptr
+            if (operand.toLowerCase().startsWith('word ptr ')) {
+                isWordPtr = true;
+                actualOperand = operand.substring(9).trim();
+            } else if (operand.toLowerCase().startsWith('byte ptr ')) {
+                isBytePtr = true;
+                actualOperand = operand.substring(9).trim();
+            }
+            
+            // 如果不是方括号括起来的，但也不是寄存器，尝试作为直接地址
+            if (!actualOperand.startsWith('[') && !actualOperand.endsWith(']')) {
+                actualOperand = '[' + actualOperand + ']';
+            }
+            
+            const memOp = this.parseMemoryOperand(actualOperand);
+            if (memOp) {
+                // 默认为 word ptr (16位)，除非明确指定 byte ptr
+                const opcode = isBytePtr ? 0xFE : 0xFF;
+                const reg = 0; // INC 使用 /0
+                const modRM = (memOp.mod << 6) | (reg << 3) | memOp.rm;
+                const machineCode = [opcode, modRM];
+                
+                if (memOp.dispSize === 1) {
+                    machineCode.push(memOp.disp & 0xff);
+                } else if (memOp.dispSize === 2) {
+                    machineCode.push(memOp.disp & 0xff, (memOp.disp >> 8) & 0xff);
+                }
+                
+                return {
+                    address,
+                    opcode: 'INC',
+                    operands: [operands[0].toUpperCase()],
+                    machineCode,
+                    length: machineCode.length,
+                    originalLine: originalLine.trim(),
+                    hasLabel: memOp.hasLabel,
+                    labelName: memOp.labelName
+                };
+            }
             break;
         case 'dec':
             if (operands[0] === 'al') {
@@ -2364,8 +2433,91 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     originalLine: originalLine.trim()
                 };
             }
+            
+            // 支持内存操作数的 DEC 指令
+            // DEC word ptr [mem] / DEC [mem] / DEC label
+            // 尝试解析为内存操作数或直接地址
+            const operandDec = operands[0];
+            let isWordPtrDec = false;
+            let isBytePtrDec = false;
+            let actualOperandDec = operandDec;
+            
+            // 检查是否有 word ptr 或 byte ptr
+            if (operandDec.toLowerCase().startsWith('word ptr ')) {
+                isWordPtrDec = true;
+                actualOperandDec = operandDec.substring(9).trim();
+            } else if (operandDec.toLowerCase().startsWith('byte ptr ')) {
+                isBytePtrDec = true;
+                actualOperandDec = operandDec.substring(9).trim();
+            }
+            
+            // 如果不是方括号括起来的，但也不是寄存器，尝试作为直接地址
+            if (!actualOperandDec.startsWith('[') && !actualOperandDec.endsWith(']')) {
+                actualOperandDec = '[' + actualOperandDec + ']';
+            }
+            
+            const memOpDec = this.parseMemoryOperand(actualOperandDec);
+            if (memOpDec) {
+                // 默认为 word ptr (16位)，除非明确指定 byte ptr
+                const opcodeDec = isBytePtrDec ? 0xFE : 0xFF;
+                const regDec = 1; // DEC 使用 /1
+                const modRMDec = (memOpDec.mod << 6) | (regDec << 3) | memOpDec.rm;
+                const machineCodeDec = [opcodeDec, modRMDec];
+                
+                if (memOpDec.dispSize === 1) {
+                    machineCodeDec.push(memOpDec.disp & 0xff);
+                } else if (memOpDec.dispSize === 2) {
+                    machineCodeDec.push(memOpDec.disp & 0xff, (memOpDec.disp >> 8) & 0xff);
+                }
+                
+                return {
+                    address,
+                    opcode: 'DEC',
+                    operands: [operands[0].toUpperCase()],
+                    machineCode: machineCodeDec,
+                    length: machineCodeDec.length,
+                    originalLine: originalLine.trim(),
+                    hasLabel: memOpDec.hasLabel,
+                    labelName: memOpDec.labelName
+                };
+            }
             break;
-        case 'test':
+        case 'test': {
+            // TEST reg, reg 形式
+            const reg16Map = { 'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3, 'sp': 4, 'bp': 5, 'si': 6, 'di': 7 };
+            const reg8Map = { 'al': 0, 'cl': 1, 'dl': 2, 'bl': 3, 'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7 };
+            
+            // TEST r/m16, r16
+            if (reg16Map.hasOwnProperty(operands[0]) && reg16Map.hasOwnProperty(operands[1])) {
+                const dst = reg16Map[operands[0]];
+                const src = reg16Map[operands[1]];
+                const modRM = (3 << 6) | (src << 3) | dst;  // mod=11, reg=src, rm=dst
+                return {
+                    address,
+                    opcode: 'TEST',
+                    operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                    machineCode: [0x85, modRM],
+                    length: 2,
+                    originalLine: originalLine.trim()
+                };
+            }
+            
+            // TEST r/m8, r8
+            if (reg8Map.hasOwnProperty(operands[0]) && reg8Map.hasOwnProperty(operands[1])) {
+                const dst = reg8Map[operands[0]];
+                const src = reg8Map[operands[1]];
+                const modRM = (3 << 6) | (src << 3) | dst;
+                return {
+                    address,
+                    opcode: 'TEST',
+                    operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                    machineCode: [0x84, modRM],
+                    length: 2,
+                    originalLine: originalLine.trim()
+                };
+            }
+            
+            // TEST AL, imm8
             if (operands[0] === 'al') {
                 const imm8 = this.parseImmediate(operands[1]);
                 return {
@@ -2377,6 +2529,7 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     originalLine: originalLine.trim()
                 };
             }
+            // TEST AX, imm16
             if (operands[0] === 'ax') {
                 const imm16 = this.parseImmediate(operands[1]);
                 return {
@@ -2389,6 +2542,7 @@ Assembler.prototype.parseInstruction = function(line, address) {
                 };
             }
             break;
+        }
         case 'mul':
             if (operands[0] === 'bl') {
                 return {
@@ -3161,13 +3315,13 @@ Assembler.prototype.parseInstruction = function(line, address) {
         case 'jnb':
         case 'jae':
             if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 const offset = targetAddress - (address + 2);
                 const offset8 = offset & 0xff;
                 return {
                     address,
                     opcode: opcode === 'jnc' ? 'JNC' : (opcode === 'jnb' ? 'JNB' : 'JAE'),
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0x73, offset8],
                     length,
                     originalLine: originalLine.trim()
@@ -3176,13 +3330,13 @@ Assembler.prototype.parseInstruction = function(line, address) {
             break;
         case 'js':
             if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 const offset = targetAddress - (address + 2);
                 const offset8 = offset & 0xff;
                 return {
                     address,
                     opcode: 'JS',
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0x78, offset8],
                     length,
                     originalLine: originalLine.trim()
@@ -3191,13 +3345,13 @@ Assembler.prototype.parseInstruction = function(line, address) {
             break;
         case 'jns':
             if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 const offset = targetAddress - (address + 2);
                 const offset8 = offset & 0xff;
                 return {
                     address,
                     opcode: 'JNS',
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0x79, offset8],
                     length,
                     originalLine: originalLine.trim()
@@ -3206,13 +3360,13 @@ Assembler.prototype.parseInstruction = function(line, address) {
             break;
         case 'jo':
             if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 const offset = targetAddress - (address + 2);
                 const offset8 = offset & 0xff;
                 return {
                     address,
                     opcode: 'JO',
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0x70, offset8],
                     length,
                     originalLine: originalLine.trim()
@@ -3221,13 +3375,13 @@ Assembler.prototype.parseInstruction = function(line, address) {
             break;
         case 'jno':
             if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 const offset = targetAddress - (address + 2);
                 const offset8 = offset & 0xff;
                 return {
                     address,
                     opcode: 'JNO',
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0x71, offset8],
                     length,
                     originalLine: originalLine.trim()
@@ -3237,13 +3391,13 @@ Assembler.prototype.parseInstruction = function(line, address) {
         case 'jp':
         case 'jpe':
             if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 const offset = targetAddress - (address + 2);
                 const offset8 = offset & 0xff;
                 return {
                     address,
                     opcode: opcode === 'jp' ? 'JP' : 'JPE',
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0x7a, offset8],
                     length,
                     originalLine: originalLine.trim()
@@ -3253,13 +3407,13 @@ Assembler.prototype.parseInstruction = function(line, address) {
         case 'jnp':
         case 'jpo':
             if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 const offset = targetAddress - (address + 2);
                 const offset8 = offset & 0xff;
                 return {
                     address,
                     opcode: opcode === 'jnp' ? 'JNP' : 'JPO',
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0x7b, offset8],
                     length,
                     originalLine: originalLine.trim()
@@ -3269,13 +3423,13 @@ Assembler.prototype.parseInstruction = function(line, address) {
         case 'jl':
         case 'jnge':
             if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 const offset = targetAddress - (address + 2);
                 const offset8 = offset & 0xff;
                 return {
                     address,
                     opcode: opcode === 'jl' ? 'JL' : 'JNGE',
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0x7c, offset8],
                     length,
                     originalLine: originalLine.trim()
@@ -3285,13 +3439,13 @@ Assembler.prototype.parseInstruction = function(line, address) {
         case 'jnl':
         case 'jge':
             if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 const offset = targetAddress - (address + 2);
                 const offset8 = offset & 0xff;
                 return {
                     address,
                     opcode: opcode === 'jnl' ? 'JNL' : 'JGE',
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0x7d, offset8],
                     length,
                     originalLine: originalLine.trim()
@@ -3301,13 +3455,13 @@ Assembler.prototype.parseInstruction = function(line, address) {
         case 'ja':
         case 'jnbe':
             if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 const offset = targetAddress - (address + 2);
                 const offset8 = offset & 0xff;
                 return {
                     address,
                     opcode: opcode === 'ja' ? 'JA' : 'JNBE',
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0x77, offset8],
                     length,
                     originalLine: originalLine.trim()
@@ -3317,13 +3471,13 @@ Assembler.prototype.parseInstruction = function(line, address) {
         case 'jna':
         case 'jbe':
             if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 const offset = targetAddress - (address + 2);
                 const offset8 = offset & 0xff;
                 return {
                     address,
                     opcode: opcode === 'jna' ? 'JNA' : 'JBE',
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0x76, offset8],
                     length,
                     originalLine: originalLine.trim()
@@ -3332,13 +3486,13 @@ Assembler.prototype.parseInstruction = function(line, address) {
             break;
         case 'loop':
             if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 const offset = targetAddress - (address + 2);
                 const offset8 = offset & 0xff;
                 return {
                     address,
                     opcode: 'LOOP',
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0xe2, offset8],
                     length,
                     originalLine: originalLine.trim()
@@ -3348,13 +3502,13 @@ Assembler.prototype.parseInstruction = function(line, address) {
         case 'loopz':
         case 'loope':
             if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 const offset = targetAddress - (address + 2);
                 const offset8 = offset & 0xff;
                 return {
                     address,
                     opcode: opcode === 'loopz' ? 'LOOPZ' : 'LOOPE',
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0xe1, offset8],
                     length,
                     originalLine: originalLine.trim()
@@ -3364,13 +3518,13 @@ Assembler.prototype.parseInstruction = function(line, address) {
         case 'loopnz':
         case 'loopne':
             if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 const offset = targetAddress - (address + 2);
                 const offset8 = offset & 0xff;
                 return {
                     address,
                     opcode: opcode === 'loopnz' ? 'LOOPNZ' : 'LOOPNE',
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0xe0, offset8],
                     length,
                     originalLine: originalLine.trim()
@@ -3379,13 +3533,13 @@ Assembler.prototype.parseInstruction = function(line, address) {
             break;
         case 'jcxz':
             if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 const offset = targetAddress - (address + 2);
                 const offset8 = offset & 0xff;
                 return {
                     address,
                     opcode: 'JCXZ',
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0xe3, offset8],
                     length,
                     originalLine: originalLine.trim()
@@ -3751,13 +3905,13 @@ Assembler.prototype.parseInstruction = function(line, address) {
         case 'jg':
         case 'jnle':
             if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 const offset = targetAddress - (address + 2);
                 const offset8 = offset & 0xff;
                 return {
                     address,
                     opcode: opcode === 'jg' ? 'JG' : 'JNLE',
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0x7f, offset8],
                     length,
                     originalLine: originalLine.trim()
@@ -3767,13 +3921,13 @@ Assembler.prototype.parseInstruction = function(line, address) {
         case 'jng':
         case 'jle':
             if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 const offset = targetAddress - (address + 2);
                 const offset8 = offset & 0xff;
                 return {
                     address,
                     opcode: opcode === 'jng' ? 'JNG' : 'JLE',
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0x7e, offset8],
                     length,
                     originalLine: originalLine.trim()
@@ -3784,31 +3938,14 @@ Assembler.prototype.parseInstruction = function(line, address) {
         case 'jnae':
         case 'jc':
             if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
+                const targetAddress = this.parseImmediate(originalOperands[0]);
                 const offset = targetAddress - (address + 2);
                 const offset8 = offset & 0xff;
                 return {
                     address,
                     opcode: opcode === 'jc' ? 'JC' : (opcode === 'jb' ? 'JB' : 'JNAE'),
-                    operands: [operands[0]],
+                    operands: [originalOperands[0]],
                     machineCode: [0x72, offset8],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            break;
-        case 'jnb':
-        case 'jae':
-        case 'jnc':
-            if (operands.length === 1) {
-                const targetAddress = this.parseImmediate(operands[0]);
-                const offset = targetAddress - (address + 2);
-                const offset8 = offset & 0xff;
-                return {
-                    address,
-                    opcode: opcode === 'jnc' ? 'JNC' : (opcode === 'jnb' ? 'JNB' : 'JAE'),
-                    operands: [operands[0]],
-                    machineCode: [0x73, offset8],
                     length,
                     originalLine: originalLine.trim()
                 };

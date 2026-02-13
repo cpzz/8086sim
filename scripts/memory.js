@@ -3,14 +3,14 @@ class Memory {
         // 8086有1MB内存空间 (0x00000 - 0xFFFFF)
         this.size = 1024 * 1024; // 1MB
         this.memory = new Uint8Array(this.size);
-        // 初始化内存为随机值，模拟真实环境中的垃圾数据
-        this.initRandom();
+        // 初始化内存为全0
+        this.clear();
     }
     
-    // 初始化内存为随机值，模拟真实环境中的垃圾数据
-    initRandom() {
+    // 清空内存（全部置为0）
+    clear() {
         for (let i = 0; i < this.size; i++) {
-            this.memory[i] = Math.floor(Math.random() * 256);
+            this.memory[i] = 0;
         }
     }
     

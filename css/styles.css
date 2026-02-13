@@ -1064,7 +1064,6 @@ table.register-table td.register-changed {
 /* 显示控制样式 */
 .display-simulator {
     width: 100%;
-    height: 100%;
     background-color: #000;
     color: #fff;
     border: 1px solid #333;
@@ -1073,8 +1072,7 @@ table.register-table td.register-changed {
     box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
     display: flex;
     flex-direction: column;
-    flex: 1;
-    min-height: 0;
+    flex-shrink: 0;
 }
 
 .display-header {
@@ -1096,12 +1094,39 @@ table.register-table td.register-changed {
 
 .display-content {
     padding: 10px;
-    flex: 1;
-    overflow: hidden;
-    min-height: 0;
+    height: 470px; /* 固定高度：25行 * 18px + 20px padding */
+    max-height: 470px;
+    overflow-y: auto;
+    overflow-x: hidden;
     position: relative;
     display: flex;
     flex-direction: column;
+    flex-shrink: 0;
+    /* 自定义滚动条样式 */
+    scrollbar-width: thin;
+    scrollbar-color: #00ff00 #1a1a1a;
+}
+
+.display-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.display-content::-webkit-scrollbar-track {
+    background: #1a1a1a;
+    border-radius: 4px;
+}
+
+.display-content::-webkit-scrollbar-thumb {
+    background: #00ff00;
+    border-radius: 4px;
+}
+
+.display-content::-webkit-scrollbar-thumb:hover {
+    background: #00cc00;
+}
+
+.display-content:focus {
+    outline: none;
 }
 
 .display-lines {
@@ -1111,14 +1136,15 @@ table.register-table td.register-changed {
     color: #00ff00;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
     line-height: 1.4;
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
+    flex-shrink: 0;
+    min-height: min-content;
     position: relative;
 }
 
 .display-line {
+    height: 18px;
     min-height: 18px;
+    max-height: 18px;
     padding: 0 4px;
     white-space: pre;
     overflow: hidden;

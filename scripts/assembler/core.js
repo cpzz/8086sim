@@ -783,7 +783,7 @@ class Assembler {
     writeDataSegmentToMemory(cpu) {
         const ds = cpu.getSegmentRegister('ds');
         const dataSegmentBase = (ds << 4);
-
+        
         for (const data of this.dataSegments) {
             const dataAddress = dataSegmentBase + data.offset;
             for (let i = 0; i < data.data.length; i++) {
@@ -814,14 +814,34 @@ class Assembler {
     fixJumpOffsets() {
         for (let i = 0; i < this.instructions.length; i++) {
             const instr = this.instructions[i];
+            
+            // 处理所有带有标签引用的指令（如 INC counter, MOV AX, [label] 等）
+            if (instr.hasLabel && instr.labelName) {
+                const labelNameLower = instr.labelName.toLowerCase();
+                const originalLabel = this.symbolOriginalCase[labelNameLower];
+                if (originalLabel && this.symbols[originalLabel] !== undefined) {
+                    const labelAddr = this.symbols[originalLabel];
+                    // 找到机器码中的位移字段并更新
+                    // 对于直接寻址（mod=0, rm=6），位移在 ModR/M 字节之后
+                    if (instr.machineCode.length >= 4) {
+                        // 16位位移（2字节）
+                        instr.machineCode[2] = labelAddr & 0xff;
+                        instr.machineCode[3] = (labelAddr >> 8) & 0xff;
+                    }
+                }
+            }
 
             if (instr.opcode === 'CALL' && instr.length === 3 && instr.operands && instr.operands.length > 0) {
                 const targetLabel = instr.operands[0];
-                if (typeof targetLabel === 'string' && this.symbols[targetLabel.toUpperCase()]) {
-                    const targetAddr = this.symbols[targetLabel.toUpperCase()];
-                    const newOffset = targetAddr - (instr.address + 3);
-                    instr.machineCode[1] = newOffset & 0xff;
-                    instr.machineCode[2] = (newOffset >> 8) & 0xff;
+                if (typeof targetLabel === 'string') {
+                    const targetLabelLower = targetLabel.toLowerCase();
+                    const originalLabel = this.symbolOriginalCase[targetLabelLower];
+                    if (originalLabel && this.symbols[originalLabel] !== undefined) {
+                        const targetAddr = this.symbols[originalLabel];
+                        const newOffset = targetAddr - (instr.address + 3);
+                        instr.machineCode[1] = newOffset & 0xff;
+                        instr.machineCode[2] = (newOffset >> 8) & 0xff;
+                    }
                 }
             }
             else if (instr.opcode &&
@@ -832,20 +852,30 @@ class Assembler {
 
                 if (instr.operands && instr.operands.length > 0) {
                     const targetLabel = instr.operands[0];
-                    if (typeof targetLabel === 'string' && this.symbols[targetLabel.toUpperCase()]) {
-                        const targetAddr = this.symbols[targetLabel.toUpperCase()];
-                        let newOffset;
+                    if (typeof targetLabel === 'string') {
+                        const targetLabelLower = targetLabel.toLowerCase();
+                        const originalLabel = this.symbolOriginalCase[targetLabelLower];
+                        if (originalLabel && this.symbols[originalLabel] !== undefined) {
+                            const targetAddr = this.symbols[originalLabel];
+                            let newOffset;
 
-                        if (instr.opcode === 'JMP' && instr.length === 2) {
-                            newOffset = targetAddr - (instr.address + 2);
-                            instr.machineCode[1] = newOffset & 0xff;
-                        } else if (instr.opcode === 'JMP' && instr.length === 3) {
-                            newOffset = targetAddr - (instr.address + 3);
-                            instr.machineCode[1] = newOffset & 0xff;
-                            instr.machineCode[2] = (newOffset >> 8) & 0xff;
-                        } else if (instr.length === 2 && instr.machineCode[0] >= 0x70 && instr.machineCode[0] <= 0x7F) {
-                            newOffset = targetAddr - (instr.address + 2);
-                            instr.machineCode[1] = newOffset & 0xff;
+                            if (instr.opcode === 'JMP' && instr.length === 2) {
+                                newOffset = targetAddr - (instr.address + 2);
+                                instr.machineCode[1] = newOffset & 0xff;
+                            } else if (instr.opcode === 'JMP' && instr.length === 3) {
+                                newOffset = targetAddr - (instr.address + 3);
+                                instr.machineCode[1] = newOffset & 0xff;
+                                instr.machineCode[2] = (newOffset >> 8) & 0xff;
+                            } else if (instr.length === 2 && instr.machineCode[0] >= 0x70 && instr.machineCode[0] <= 0x7F) {
+                                // 短跳转指令 (Jcc)
+                                newOffset = targetAddr - (instr.address + 2);
+                                instr.machineCode[1] = newOffset & 0xff;
+                            } else if (instr.length === 2 && (instr.machineCode[0] === 0xE0 || instr.machineCode[0] === 0xE1 || 
+                                       instr.machineCode[0] === 0xE2 || instr.machineCode[0] === 0xE3)) {
+                                // LOOP/LOOPZ/LOOPNZ/JCXZ 指令
+                                newOffset = targetAddr - (instr.address + 2);
+                                instr.machineCode[1] = newOffset & 0xff;
+                            }
                         }
                     }
                 }
