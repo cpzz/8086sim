@@ -51,6 +51,9 @@ class Assembler {
                     this.currentSegment = 'code';
                     // 代码段从偏移 0 开始
                     address = 0;
+                } else if (directiveType === 'stack') {
+                    this.currentSegment = 'stack';
+                    address = 0;
                 } else if (directiveType === 'other') {
                     // 解析其他伪指令
                     this.parseDirective(line);
@@ -169,7 +172,7 @@ class Assembler {
                     this.codeDataSegments.push({
                         offset: address,
                         data: data,
-                        label: potentialLabel,
+                        label: realLabel,
                         originalLine: line.trim()
                     });
                 }
@@ -201,7 +204,7 @@ class Assembler {
                     this.codeDataSegments.push({
                         offset: address,
                         data: data,
-                        label: potentialLabel,
+                        label: realLabel,
                         originalLine: line.trim()
                     });
                 }
@@ -347,7 +350,9 @@ class Assembler {
                 continue;
             }
 
-            address += this.getInstructionLength(line);
+            const instrLen = this.getInstructionLength(line);
+            console.log(`[Pass1] addr=0x${address.toString(16).padStart(4,'0')} len=${instrLen} line="${line}"`);
+            address += instrLen;
         }
 
         // 第一遍结束后，重新计算纯标签行的地址
@@ -362,7 +367,7 @@ class Assembler {
 
             const directiveType = this.getDirectiveType(line);
             if (directiveType) {
-                if (directiveType === 'data' || directiveType === 'code') {
+                if (directiveType === 'data' || directiveType === 'code' || directiveType === 'stack') {
                     address = 0;
                 }
                 continue;
@@ -402,6 +407,7 @@ class Assembler {
             // 记录地址，然后根据 getInstructionLength() 增加地址
             lineAddresses[i] = address;
             const instrLen = this.getInstructionLength(line);
+            console.log(`[Pass1.5] addr=0x${address.toString(16).padStart(4,'0')} len=${instrLen} line="${line}"`);
             address += instrLen;
         }
 
@@ -476,6 +482,9 @@ class Assembler {
                     address = 0;
                 } else if (directiveType === 'code') {
                     this.currentSegment = 'code';
+                    address = 0;
+                } else if (directiveType === 'stack') {
+                    this.currentSegment = 'stack';
                     address = 0;
                 } else if (directiveType === 'other') {
                     // 解析其他伪指令
@@ -658,8 +667,8 @@ class Assembler {
                 continue;
             }
 
-            // 在代码段中，跳过数据定义（它们已经在第一遍扫描时处理并写入数据段）
-            if (this.currentSegment === 'code') {
+            // 在代码段或堆栈段中，跳过数据定义（它们已经在第一遍扫描时处理）
+            if (this.currentSegment === 'code' || this.currentSegment === 'stack') {
                 const lowerLineForData = lowerLine2;
                 // 检查是否是数据定义
                 const isDataDef = lowerLineForData.includes(' db ') ||
@@ -688,6 +697,11 @@ class Assembler {
                 this.instructions.push(instruction);
                 // 写入内存
                 this.writeInstructionToMemory(instruction);
+                const expectedLen = this.getInstructionLength(line);
+                if (instruction.length !== expectedLen) {
+                    console.warn(`[Pass2 MISMATCH] addr=0x${address.toString(16).padStart(4,'0')} instrLen=${instruction.length} vs getInstructionLength=${expectedLen} line="${line}" machineCode=[${instruction.machineCode.map(b=>'0x'+b.toString(16).padStart(2,'0')).join(',')}]`);
+                }
+                console.log(`[Pass2] addr=0x${address.toString(16).padStart(4,'0')} len=${instruction.length} line="${line}" machineCode=[${instruction.machineCode.map(b=>'0x'+b.toString(16).padStart(2,'0')).join(',')}]`);
                 address += instruction.length;
             } else {
                 // 对于不生成机器码的伪指令
@@ -767,9 +781,11 @@ class Assembler {
     writeCodeSegmentToMemory(cpu) {
         const cs = cpu.getSegmentRegister('cs');
         const codeSegmentBase = (cs << 4);
+        console.log(`[writeCodeSeg] CS=0x${cs.toString(16)} base=0x${codeSegmentBase.toString(16)} instrCount=${this.instructions.length}`);
 
         for (const instruction of this.instructions) {
             const instructionAddress = codeSegmentBase + instruction.address;
+            console.log(`[writeCodeSeg] writing ${instruction.machineCode.length} bytes at phys=0x${instructionAddress.toString(16)} offset=0x${instruction.address.toString(16)} code=[${instruction.machineCode.map(b=>'0x'+b.toString(16).padStart(2,'0')).join(',')}]`);
             for (let i = 0; i < instruction.machineCode.length; i++) {
                 this.memory.write8(instructionAddress + i, instruction.machineCode[i]);
             }
@@ -780,6 +796,13 @@ class Assembler {
             for (let i = 0; i < data.data.length; i++) {
                 this.memory.write8(dataAddress + i, data.data[i]);
             }
+        }
+        // 验证写入是否成功
+        if (this.instructions.length > 0) {
+            const firstInstr = this.instructions[0];
+            const verifyAddr = codeSegmentBase + firstInstr.address;
+            const readBack = this.memory.read8(verifyAddr);
+            console.log(`[writeCodeSeg VERIFY] phys=0x${verifyAddr.toString(16)} expected=0x${firstInstr.machineCode[0].toString(16)} got=0x${readBack.toString(16)}`);
         }
     }
 

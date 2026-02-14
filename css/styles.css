@@ -698,6 +698,113 @@ table.register-table td.register-changed {
     font-weight: 600;
 }
 
+/* 中断向量表样式 */
+.ivt-grid {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.ivt-table {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 13px;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    overflow: hidden;
+    background-color: white;
+}
+
+.ivt-table-header {
+    display: flex;
+    background-color: #e9ecef;
+    font-weight: 600;
+    border-bottom: 2px solid #dee2e6;
+    flex-shrink: 0;
+    color: #495057;
+}
+
+.ivt-table-body {
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+.ivt-table-row {
+    display: flex;
+    border-bottom: 1px solid #f1f3f4;
+    transition: background-color 0.2s ease;
+}
+
+.ivt-table-row:hover {
+    background-color: #f0f7ff;
+}
+
+.ivt-table-row:nth-child(even) {
+    background-color: #fafbfc;
+}
+
+.ivt-table-row:nth-child(even):hover {
+    background-color: #f0f7ff;
+}
+
+.ivt-cell {
+    padding: 5px 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ivt-cell.ivt-num {
+    min-width: 90px;
+    width: 90px;
+    color: #0d47a1;
+    font-weight: 600;
+}
+
+.ivt-cell.ivt-addr {
+    min-width: 100px;
+    width: 100px;
+    color: #666;
+}
+
+.ivt-cell.ivt-vector {
+    min-width: 140px;
+    width: 140px;
+    color: #2c3e50;
+    font-weight: 500;
+}
+
+.ivt-cell.ivt-desc {
+    flex: 1;
+    min-width: 100px;
+    color: #6c757d;
+    font-size: 12px;
+}
+
+/* IVT 变化高亮 */
+.ivt-table-row.ivt-changed {
+    background-color: #fff3cd !important;
+}
+
+.ivt-table-row.ivt-changed .ivt-vector {
+    color: #d63384;
+    font-weight: 700;
+}
+
+/* IVT 有注册处理函数的条目 */
+.ivt-table-row.ivt-has-handler {
+    border-left: 3px solid #4CAF50;
+}
+
+.ivt-table-row.ivt-has-handler .ivt-num {
+    color: #1e7e34;
+}
 
 
 /* 内存面板样式 */

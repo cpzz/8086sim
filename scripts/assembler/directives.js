@@ -16,15 +16,18 @@ Assembler.prototype.getDirectiveType = function(line) {
 
     if (lowerLine.startsWith('assume ')) {
         return 'other';
-    } else if (lowerLine.endsWith(' segment')) {
-        const parts = lowerLine.split(/\s+/).filter(Boolean);
-        const segmentName = parts[0].toLowerCase();
-        if (segmentName === 'data') {
-            return 'data';
-        } else if (segmentName === 'code') {
-            return 'code';
+    } else if (lowerLine.includes(' segment')) {
+        // 匹配 xxx SEGMENT 或 xxx SEGMENT yyy (如 STACK SEGMENT STACK)
+        const segMatch = lowerLine.match(/^(\w+)\s+segment(\s+.*)?$/);
+        if (segMatch) {
+            const segmentName = segMatch[1].toLowerCase();
+            if (segmentName === 'data') {
+                return 'data';
+            } else if (segmentName === 'code') {
+                return 'code';
+            }
+            return 'stack'; // stack或其他命名段
         }
-        return 'other';
     } else if (lowerLine.endsWith(' ends')) {
         return 'other';
     }

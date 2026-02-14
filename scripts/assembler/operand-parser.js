@@ -19,8 +19,14 @@ Assembler.prototype.parseImmediate = function(value) {
         }
     }
 
-    if (valueLower === '@data') {
+    if (valueLower === '@data' || valueLower === 'data') {
         return 0x2000;
+    }
+    if (valueLower === 'code') {
+        return 0x1000;
+    }
+    if (valueLower === 'stack') {
+        return 0x3000;
     }
 
     if (value.startsWith('0x')) {
@@ -42,7 +48,8 @@ Assembler.prototype.parseImmediate = function(value) {
 };
 
 Assembler.prototype.isImmediate = function(value) {
-    const registers = ['ax', 'bx', 'cx', 'dx', 'si', 'di', 'sp', 'bp', 'al', 'ah', 'bl', 'bh', 'cl', 'ch', 'dl', 'dh'];
+    const registers = ['ax', 'bx', 'cx', 'dx', 'si', 'di', 'sp', 'bp', 'al', 'ah', 'bl', 'bh', 'cl', 'ch', 'dl', 'dh',
+                       'es', 'cs', 'ss', 'ds'];
     if (registers.includes(value.toLowerCase())) {
         return false;
     }

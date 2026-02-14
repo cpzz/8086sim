@@ -183,6 +183,7 @@ function stepExecution() {
     updateMemoryDisplay(getMemoryDisplayOffset()); // 跟踪内存访问位置
     updateInstructionsDisplay();
     updateScreenDisplay(); // 更新屏幕显示
+    if (currentMemorySegment === 'ivt') updateIvtDisplay();
     // 高亮寄存器值改变
     highlightRegisterChanges(registerOperations);
 
@@ -238,6 +239,7 @@ function runExecution() {
         updateMemoryDisplay(getMemoryDisplayOffset());
         updateInstructionsDisplay();
         updateScreenDisplay();
+        if (currentMemorySegment === 'ivt') updateIvtDisplay();
         highlightRegisterChanges(registerOperations);
         highlightIPRegister();
         updateButtonStates(false);
@@ -280,6 +282,7 @@ function runExecution() {
     updateMemoryDisplay(getMemoryDisplayOffset()); // 跟踪内存访问位置
     updateInstructionsDisplay();
     updateScreenDisplay(); // 更新屏幕显示
+    if (currentMemorySegment === 'ivt') updateIvtDisplay();
     // 更新按钮状态
     updateButtonStates(false);
     // 高亮寄存器值改变
@@ -366,9 +369,19 @@ function resetSimulator() {
         assembler.writeCodeSegmentToMemory(cpu);
         assembler.writeDataSegmentToMemory(cpu);
         
-        // 设置IP为入口点
-        if (assembler.entryPoint && assembler.symbols.hasOwnProperty(assembler.entryPoint)) {
-            cpu.ip = assembler.symbols[assembler.entryPoint];
+        // 设置IP为入口点（大小写不敏感查找）
+        let entryAddr = null;
+        if (assembler.entryPoint) {
+            const epLower = assembler.entryPoint.toLowerCase();
+            for (const key in assembler.symbols) {
+                if (key.toLowerCase() === epLower && typeof assembler.symbols[key] === 'number') {
+                    entryAddr = assembler.symbols[key];
+                    break;
+                }
+            }
+        }
+        if (entryAddr !== null) {
+            cpu.ip = entryAddr;
         } else {
             // 否则使用第一条指令的地址
             cpu.ip = instructions[0].address;
@@ -386,6 +399,8 @@ function resetSimulator() {
     updateMemoryDisplay(0x0000);
     updateInstructionsDisplay(); // 更新指令列表显示，高亮当前指令
     updateDisplayOutput(); // 清空屏幕显示
+    resetIvtSnapshot(); // 复位后重置IVT快照，避免误标变化
+    updateIvtDisplay(); // 更新中断向量表显示
 
     // 重置按钮状态
     updateButtonStates(false);
@@ -421,6 +436,7 @@ function handleFileLoad(e) {
             instructions = parsedInstructions;
 
             // 重置CPU（包括寄存器和标志位）
+            memory.clear();
             cpu.reset();
 
             // 重置状态变量
@@ -443,8 +459,18 @@ function handleFileLoad(e) {
             // 如果有指令，设置CPU的指令指针指向入口点
             if (instructions.length > 0) {
                 // 如果汇编器指定了入口点（如 end main），则使用入口点
-                if (assembler.entryPoint && assembler.symbols.hasOwnProperty(assembler.entryPoint)) {
-                    cpu.ip = assembler.symbols[assembler.entryPoint];
+                let entryAddr = null;
+                if (assembler.entryPoint) {
+                    const epLower = assembler.entryPoint.toLowerCase();
+                    for (const key in assembler.symbols) {
+                        if (key.toLowerCase() === epLower && typeof assembler.symbols[key] === 'number') {
+                            entryAddr = assembler.symbols[key];
+                            break;
+                        }
+                    }
+                }
+                if (entryAddr !== null) {
+                    cpu.ip = entryAddr;
                 } else {
                     // 否则使用第一条指令的地址
                     cpu.ip = instructions[0].address;
@@ -474,6 +500,8 @@ function handleFileLoad(e) {
                 updateMemoryDisplay(0x0000);
             }
             updateDisplayOutput(); // 清空屏幕显示
+            resetIvtSnapshot(); // 加载文件后重置IVT快照，避免误标变化
+            updateIvtDisplay(); // 更新中断向量表（加载文件后IVT已初始化）
 
             // 清除寄存器和内存操作跟踪
             cpu.clearRegisterOperations();
@@ -513,6 +541,7 @@ function init() {
     updateRegistersDisplay();
     updateMemoryDisplay(0x0000);
     updateInstructionsDisplay();
+    updateIvtDisplay();
 }
 
 // 页面加载完成后初始化

@@ -176,6 +176,54 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     originalLine: originalLine.trim()
                 };
             }
+            // ADD r16, [mem] - 操作码03
+            {
+                const addRegMap16Mem = {
+                    'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
+                    'sp': 4, 'bp': 5, 'si': 6, 'di': 7
+                };
+                if (addRegMap16Mem.hasOwnProperty(operands[0]) && operands[1] && operands[1].includes('[')) {
+                    const memOp = this.parseMemoryOperand(operands[1]);
+                    if (memOp) {
+                        const reg = addRegMap16Mem[operands[0]];
+                        const modRM = (memOp.mod << 6) | (reg << 3) | memOp.rm;
+                        const machineCode = [0x03, modRM];
+                        if (memOp.dispSize === 1) machineCode.push(memOp.disp & 0xff);
+                        else if (memOp.dispSize === 2) machineCode.push(memOp.disp & 0xff, (memOp.disp >> 8) & 0xff);
+                        return {
+                            address,
+                            opcode: 'ADD',
+                            operands: [operands[0].toUpperCase(), originalOperands[1]],
+                            machineCode,
+                            length,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                }
+                // ADD r8, [mem] - 操作码02
+                const addReg8MapMem = {
+                    'al': 0, 'cl': 1, 'dl': 2, 'bl': 3,
+                    'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7
+                };
+                if (addReg8MapMem.hasOwnProperty(operands[0]) && operands[1] && operands[1].includes('[')) {
+                    const memOp = this.parseMemoryOperand(operands[1]);
+                    if (memOp) {
+                        const reg = addReg8MapMem[operands[0]];
+                        const modRM = (memOp.mod << 6) | (reg << 3) | memOp.rm;
+                        const machineCode = [0x02, modRM];
+                        if (memOp.dispSize === 1) machineCode.push(memOp.disp & 0xff);
+                        else if (memOp.dispSize === 2) machineCode.push(memOp.disp & 0xff, (memOp.disp >> 8) & 0xff);
+                        return {
+                            address,
+                            opcode: 'ADD',
+                            operands: [operands[0].toUpperCase(), originalOperands[1]],
+                            machineCode,
+                            length,
+                            originalLine: originalLine.trim()
+                        };
+                    }
+                }
+            }
             break;
         case 'sub':
             // SUB AL, imm8
@@ -1149,52 +1197,101 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     originalLine: originalLine.trim()
                 };
             }
-            // 支持MOV 标签, 寄存器 格式（如 MOV NUM, AX）
-            if (originalOperands.length > 0) {
-                // 先尝试使用原始操作数（保持大小写）匹配
-                let label = originalOperands[0];
-                if (this.symbols.hasOwnProperty(label)) {
-                    const srcReg = operands[1].toLowerCase();
-                    const regMap = {
-                        'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
-                        'sp': 4, 'bp': 5, 'si': 6, 'di': 7
+            // MOV 段寄存器到段寄存器（伪指令：通过AX中转，生成2条指令）
+            {
+                const segRegs = ['es', 'cs', 'ss', 'ds'];
+                const segRegCode = { 'es': 0, 'cs': 1, 'ss': 2, 'ds': 3 };
+                if (segRegs.includes(operands[0]) && segRegs.includes(operands[1])) {
+                    const src = segRegCode[operands[1]];
+                    const dst = segRegCode[operands[0]];
+                    // MOV AX, Sreg2 (8C mod=11, reg=sreg2, rm=000)
+                    const modrm1 = 0xc0 | (src << 3);
+                    // MOV Sreg1, AX (8E mod=11, reg=sreg1, rm=000)
+                    const modrm2 = 0xc0 | (dst << 3);
+                    return {
+                        address,
+                        opcode: 'MOV',
+                        operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                        machineCode: [0x8c, modrm1, 0x8e, modrm2],
+                        length,
+                        originalLine: originalLine.trim()
                     };
-
-                    if (regMap.hasOwnProperty(srcReg)) {
-                        const offset = this.symbols[label];
-                        // MOV m16, r16 - 操作码89, mod=00, reg=源寄存器, r/m=110(直接寻址)
-                        const modRM = (regMap[srcReg] << 3) | 0x06; // 0b00rrr110
-                        return {
-                            address,
-                            opcode: 'MOV',
-                            operands: [label, operands[1].toUpperCase()],
-                            machineCode: [0x89, modRM, offset & 0xff, (offset >> 8) & 0xff],
-                            length,
-                            originalLine: originalLine.trim()
-                        };
-                    }
                 }
-                // 如果原始操作数匹配失败，尝试使用小写匹配
-                label = operands[0];
-                if (this.symbols.hasOwnProperty(label)) {
-                    const srcReg = operands[1].toLowerCase();
-                    const regMap = {
-                        'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
-                        'sp': 4, 'bp': 5, 'si': 6, 'di': 7
-                    };
+            }
+            // 支持MOV 标签/标签+偏移, 寄存器/段寄存器 格式（如 MOV NUM, AX 或 MOV OLD_INT60+2, ES）
+            if (originalOperands.length > 0) {
+                const gpRegMap = {
+                    'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
+                    'sp': 4, 'bp': 5, 'si': 6, 'di': 7
+                };
+                const segRegMap = { 'es': 0, 'cs': 1, 'ss': 2, 'ds': 3 };
+                const srcReg = operands[1].toLowerCase();
+                const isGpSrc = gpRegMap.hasOwnProperty(srcReg);
+                const isSegSrc = segRegMap.hasOwnProperty(srcReg);
 
-                    if (regMap.hasOwnProperty(srcReg)) {
-                        const offset = this.symbols[label];
-                        // MOV m16, r16 - 操作码89, mod=00, reg=源寄存器, r/m=110(直接寻址)
-                        const modRM = (regMap[srcReg] << 3) | 0x06; // 0b00rrr110
-                        return {
-                            address,
-                            opcode: 'MOV',
-                            operands: [label, operands[1].toUpperCase()],
-                            machineCode: [0x89, modRM, offset & 0xff, (offset >> 8) & 0xff],
-                            length,
-                            originalLine: originalLine.trim()
-                        };
+                if (isGpSrc || isSegSrc) {
+                    // 解析目标操作数：支持 label 和 label+N / label-N
+                    let resolvedOffset = null;
+                    let displayLabel = originalOperands[0];
+
+                    // 先直接查找符号表（原始大小写）
+                    if (this.symbols.hasOwnProperty(originalOperands[0])) {
+                        resolvedOffset = this.symbols[originalOperands[0]];
+                    }
+                    // 再尝试小写查找
+                    if (resolvedOffset === null && this.symbols.hasOwnProperty(operands[0])) {
+                        resolvedOffset = this.symbols[operands[0]];
+                    }
+                    // 尝试 label+N 或 label-N 表达式
+                    if (resolvedOffset === null) {
+                        const exprMatch = originalOperands[0].match(/^([A-Za-z_]\w*)\s*([\+\-])\s*(\d+)$/);
+                        if (exprMatch) {
+                            const labelName = exprMatch[1];
+                            const op = exprMatch[2];
+                            const num = parseInt(exprMatch[3], 10);
+                            let baseAddr = null;
+                            if (this.symbols.hasOwnProperty(labelName)) {
+                                baseAddr = this.symbols[labelName];
+                            } else {
+                                // 小写查找
+                                for (const key in this.symbols) {
+                                    if (key.toLowerCase() === labelName.toLowerCase()) {
+                                        baseAddr = this.symbols[key];
+                                        break;
+                                    }
+                                }
+                            }
+                            if (baseAddr !== null) {
+                                resolvedOffset = op === '+' ? baseAddr + num : baseAddr - num;
+                                resolvedOffset &= 0xFFFF;
+                            }
+                        }
+                    }
+
+                    if (resolvedOffset !== null) {
+                        if (isGpSrc) {
+                            // MOV m16, r16 - 操作码89, mod=00, reg=源寄存器, r/m=110(直接寻址)
+                            const modRM = (gpRegMap[srcReg] << 3) | 0x06;
+                            return {
+                                address,
+                                opcode: 'MOV',
+                                operands: [displayLabel, operands[1].toUpperCase()],
+                                machineCode: [0x89, modRM, resolvedOffset & 0xff, (resolvedOffset >> 8) & 0xff],
+                                length,
+                                originalLine: originalLine.trim()
+                            };
+                        } else {
+                            // MOV m16, Sreg - 操作码8C, mod=00, reg=段寄存器, r/m=110(直接寻址)
+                            const modRM = (segRegMap[srcReg] << 3) | 0x06;
+                            return {
+                                address,
+                                opcode: 'MOV',
+                                operands: [displayLabel, operands[1].toUpperCase()],
+                                machineCode: [0x8c, modRM, resolvedOffset & 0xff, (resolvedOffset >> 8) & 0xff],
+                                length,
+                                originalLine: originalLine.trim()
+                            };
+                        }
                     }
                 }
             }
@@ -1836,6 +1933,29 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     length,
                     originalLine: originalLine.trim()
                 };
+            }
+            // PUSH imm (80186+): PUSH imm8 = 0x6A, PUSH imm16 = 0x68
+            if (this.isImmediate(operands[0])) {
+                const imm = this.parseImmediate(operands[0]);
+                if (imm >= -128 && imm <= 127) {
+                    return {
+                        address,
+                        opcode: 'PUSH',
+                        operands: [operands[0]],
+                        machineCode: [0x6a, imm & 0xff],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                } else {
+                    return {
+                        address,
+                        opcode: 'PUSH',
+                        operands: [operands[0]],
+                        machineCode: [0x68, imm & 0xff, (imm >> 8) & 0xff],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                }
             }
             break;
         }
@@ -3730,10 +3850,12 @@ Assembler.prototype.parseInstruction = function(line, address) {
                 };
                 if (regMap.hasOwnProperty(destReg)) {
                     const modRM = (regMap[destReg] << 3) | 0x06; // 直接寻址
-                    // 对于标签，需要获取其地址
+                    // 对于标签，需要获取其地址（不区分大小写）
                     let offset = 0;
-                    if (this.symbols.hasOwnProperty(operands[1])) {
-                        offset = this.symbols[operands[1]];
+                    const srcLower = operands[1].toLowerCase();
+                    const symbolKey = Object.keys(this.symbols).find(k => k.toLowerCase() === srcLower);
+                    if (symbolKey) {
+                        offset = this.symbols[symbolKey];
                     }
                     return {
                         address,
@@ -3756,8 +3878,10 @@ Assembler.prototype.parseInstruction = function(line, address) {
                 if (regMap.hasOwnProperty(destReg)) {
                     const modRM = (regMap[destReg] << 3) | 0x06; // 直接寻址
                     let offset = 0;
-                    if (this.symbols.hasOwnProperty(operands[1])) {
-                        offset = this.symbols[operands[1]];
+                    const srcLower = operands[1].toLowerCase();
+                    const symbolKey = Object.keys(this.symbols).find(k => k.toLowerCase() === srcLower);
+                    if (symbolKey) {
+                        offset = this.symbols[symbolKey];
                     }
                     return {
                         address,

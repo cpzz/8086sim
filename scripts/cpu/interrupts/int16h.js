@@ -16,8 +16,6 @@ CPU8086.prototype.int16AH00WaitKey = function() {
     if (this.keyboardBuffer.length > 0) {
         const key = this.keyboardBuffer.shift();
         this.setRegister('ax', (this.getRegister('ax') & 0xff00) | key);
-        this.ip += 2;
-        this.ip &= 0xffff;
         return true;
     } else {
         if (this.waitForKeyPress && !this.waitingForKey) {
@@ -42,7 +40,5 @@ CPU8086.prototype.int16AH01CheckKey = function() {
     } else {
         this.flags.zf = 1;
     }
-    this.ip += 2;
-    this.ip &= 0xffff;
     return true;
 };

@@ -18,6 +18,10 @@ CPU8086.prototype.handleInt21 = function() {
             return this.int21AH0AStringInput();
         case 0x0b:
             return this.int21AH0BCheckKeyboardStatus();
+        case 0x25:
+            return this.int21AH25SetInterruptVector();
+        case 0x35:
+            return this.int21AH35GetInterruptVector();
         case 0x4c:
             return this.int21AH4CExit();
         case 0x20:
@@ -283,4 +287,29 @@ CPU8086.prototype.int21AH4CExit = function() {
     // exit program, set IP to 0xFFFF to prevent further execution
     this.ip = 0xffff;
     return false;
+};
+
+// INT 21H AH=25H: 设置中断向量
+// 入口: AL=中断号, DS:DX=新的中断处理程序地址
+CPU8086.prototype.int21AH25SetInterruptVector = function() {
+    const intNum = this.getRegister('ax') & 0xff; // AL = 中断号
+    const newOffset = this.getRegister('dx');
+    const newSegment = this.getSegmentRegister('ds');
+    const ivtAddr = intNum * 4;
+    this.memory.write16(ivtAddr, newOffset);
+    this.memory.write16(ivtAddr + 2, newSegment);
+    return true;
+};
+
+// INT 21H AH=35H: 读取中断向量
+// 入口: AL=中断号
+// 出口: ES:BX=中断处理程序地址
+CPU8086.prototype.int21AH35GetInterruptVector = function() {
+    const intNum = this.getRegister('ax') & 0xff; // AL = 中断号
+    const ivtAddr = intNum * 4;
+    const offset = this.memory.read16(ivtAddr);
+    const segment = this.memory.read16(ivtAddr + 2);
+    this.setRegister('bx', offset);
+    this.setSegmentRegister('es', segment);
+    return true;
 };

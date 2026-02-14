@@ -108,6 +108,10 @@ Assembler.prototype.getInstructionLength = function(line) {
     switch (opcode) {
         case 'nop':
         case 'ret':
+            if (operands.length > 0 && this.isImmediate(operands[0])) {
+                return 3; // RET imm16
+            }
+            return 1;
         case 'retf':
         case 'pushf':
         case 'popf':
@@ -412,6 +416,21 @@ Assembler.prototype.getInstructionLength = function(line) {
             // 检查是否是从数据段变量加载数据（例如 MOV DL, SINGLE_TOP_LEFT）
             // 这种指令在8086中通常为4字节（8A /r modrm disp16）
             else if (!isMemoryOperandMov(operands[0]) && !isMemoryOperandMov(operands[1])) {
+                const segRegsLen = ['es', 'cs', 'ss', 'ds'];
+                // 段寄存器 ↔ 通用寄存器 = 2字节（0x8C / 0x8E）
+                const isOp0Seg = segRegsLen.includes(operands[0].toLowerCase());
+                const isOp1Seg = segRegsLen.includes(operands[1].toLowerCase());
+                if (isOp0Seg || isOp1Seg) {
+                    // 段寄存器到段寄存器 = 4字节（通过AX中转）
+                    if (isOp0Seg && isOp1Seg) return 4;
+                    // 确认另一个操作数是通用寄存器才返回2字节
+                    const gpRegs = ['ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'];
+                    const otherOp = isOp1Seg ? operands[0].toLowerCase() : operands[1].toLowerCase();
+                    if (gpRegs.includes(otherOp)) return 2;
+                    // 另一个操作数是标签 → MOV mem16, Sreg / MOV Sreg, mem16 = 4字节
+                    return 4;
+                }
+
                 // 检查第一个操作数是否是寄存器，第二个操作数是否是已知标签
                 const isDestReg8 = ['al', 'ah', 'bl', 'bh', 'cl', 'ch', 'dl', 'dh'].includes(operands[0].toLowerCase());
                 const isDestReg16 = ['ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'].includes(operands[0].toLowerCase());
@@ -424,11 +443,25 @@ Assembler.prototype.getInstructionLength = function(line) {
                     // 否则是从内存读取（4字节）
                     return hasOffset ? 3 : 4;
                 }
+
+                // MOV label, register（标签作为目标，寄存器作为源）= 4字节
+                const isSrcReg = ['al', 'ah', 'bl', 'bh', 'cl', 'ch', 'dl', 'dh',
+                                  'ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'].includes(operands[1].toLowerCase());
+                if (!(isDestReg8 || isDestReg16) && isSrcReg) {
+                    return 4;
+                }
             }
             // 内存寻址操作：根据寻址模式估计长度
             if (isMemoryOperandMov(operands[0]) || isMemoryOperandMov(operands[1])) {
                 const memOp = isMemoryOperandMov(operands[0]) ? operands[0] : operands[1];
                 return estimateMemoryLengthMov(memOp);
+            }
+            // MOV 标签/标签+偏移, 段寄存器（MOV label, ES / MOV label+2, ES）：4字节
+            {
+                const segRegs = ['es', 'cs', 'ss', 'ds'];
+                if (segRegs.includes(operands[1].toLowerCase()) && !segRegs.includes(operands[0].toLowerCase())) {
+                    return 4;
+                }
             }
             // 寄存器到寄存器：2字节
             return 2;
@@ -443,6 +476,12 @@ Assembler.prototype.getInstructionLength = function(line) {
         case 'rcr':
             return 2;
         case 'push':
+            if (operands.length > 0 && this.isImmediate(operands[0])) {
+                const immVal = this.parseImmediate(operands[0]);
+                if (immVal >= -128 && immVal <= 127) return 2; // PUSH imm8
+                return 3; // PUSH imm16
+            }
+            return 1;
         case 'pop':
             return 1;
         case 'cmp':

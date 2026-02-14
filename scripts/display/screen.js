@@ -91,7 +91,11 @@ function initScreen() {
             } else if (currentLeftTab === 'registers') {
                 updateRegistersDisplay();
             } else if (currentLeftTab === 'memory') {
-                updateMemoryDisplay(0x0000);
+                if (currentMemorySegment === 'ivt') {
+                    updateIvtDisplay();
+                } else {
+                    updateMemoryDisplay(0x0000);
+                }
             }
         });
     });
@@ -107,8 +111,21 @@ function initScreen() {
             // 更新当前内存段
             currentMemorySegment = tab.dataset.segment;
 
-            // 更新内存显示
-            updateMemoryDisplay(0x0000);
+            // 切换 memory-grid 和 ivt-grid 的显示
+            const memoryGrid = document.getElementById('memory-grid');
+            const ivtGrid = document.getElementById('ivt-grid');
+            const memoryControls = document.getElementById('memory-controls');
+            if (currentMemorySegment === 'ivt') {
+                memoryGrid.style.display = 'none';
+                ivtGrid.style.display = '';
+                if (memoryControls) memoryControls.style.display = 'none';
+                updateIvtDisplay();
+            } else {
+                memoryGrid.style.display = '';
+                ivtGrid.style.display = 'none';
+                if (memoryControls) memoryControls.style.display = '';
+                updateMemoryDisplay(0x0000);
+            }
         });
     });
 }

@@ -50,13 +50,69 @@ CPU8086.prototype.reset = function() {
     this.waitingForKey = false;
     this._stringInputState = null;
 
+    // 清空中断队列
+    this.pendingInterrupts = [];
+
     // 停止运行
     this.running = false;
     this.currentInstruction = null;
+
+    // 初始化中断向量表和BIOS存根
+    this.initInterruptSystem();
 }
 
 // 单步执行
 CPU8086.prototype.step = function() {
+    // 检查是否有待处理的硬件中断（IF=1 才响应）
+    if (this.flags.if && this.pendingInterrupts.length > 0) {
+        const intNum = this.pendingInterrupts.shift();
+        // 推入 FLAGS, CS, IP
+        const flagsVal = this.getFlags();
+        this.setRegister('sp', (this.getRegister('sp') - 2) & 0xFFFF);
+        this.writeMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')), flagsVal);
+        this.setRegister('sp', (this.getRegister('sp') - 2) & 0xFFFF);
+        this.writeMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')), this.getSegmentRegister('cs'));
+        this.setRegister('sp', (this.getRegister('sp') - 2) & 0xFFFF);
+        this.writeMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')), this.ip);
+        // 清除 IF, TF
+        this.flags.if = 0;
+        this.flags.tf = 0;
+        // 从 IVT 加载 CS:IP
+        const ivtAddr = intNum * 4;
+        this.ip = this.memory.read16(ivtAddr);
+        this.setSegmentRegister('cs', this.memory.read16(ivtAddr + 2));
+    }
+
+    // 检查是否正在 BIOS 存根地址执行（用户通过 JMP FAR 跳回原始向量时触发）
+    const currentCS = this.getSegmentRegister('cs');
+    if (currentCS === this.biosHandlerBase && this.biosHandlers[this.ip]) {
+        const handler = this.biosHandlers[this.ip];
+        if (!handler()) {
+            // 阻塞（如等待键盘），回退到调用者：恢复栈上的 IP/CS/FLAGS
+            const savedIP = this.readMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')));
+            this.setRegister('sp', (this.getRegister('sp') + 2) & 0xFFFF);
+            const savedCS = this.readMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')));
+            this.setRegister('sp', (this.getRegister('sp') + 2) & 0xFFFF);
+            const savedFlags = this.readMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')));
+            this.setRegister('sp', (this.getRegister('sp') + 2) & 0xFFFF);
+            this.setSegmentRegister('cs', savedCS);
+            this.ip = savedIP;
+            this.setFlags(savedFlags);
+            return false;
+        }
+        // 处理成功，执行 IRET（从栈弹出 IP, CS, FLAGS）
+        const retIP = this.readMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')));
+        this.setRegister('sp', (this.getRegister('sp') + 2) & 0xFFFF);
+        const retCS = this.readMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')));
+        this.setRegister('sp', (this.getRegister('sp') + 2) & 0xFFFF);
+        const retFlags = this.readMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')));
+        this.setRegister('sp', (this.getRegister('sp') + 2) & 0xFFFF);
+        this.setSegmentRegister('cs', retCS);
+        this.ip = retIP;
+        this.setFlags(retFlags);
+        return true;
+    }
+
     // 读取当前指令
     const currentAddress = this.getMemoryAddress(this.getSegmentRegister('cs'), this.ip);
     const opcode = this.readMemory8(currentAddress);
@@ -1583,15 +1639,75 @@ CPU8086.prototype.step = function() {
             // 对于RET指令，不需要再增加IP，因为已经设置了returnAddress
             instructionLength = 0;
             break;
-        case 0xcd: // INT imm8
+        case 0xcd: { // INT imm8 — 软件中断，通过 IVT 分发
             const interruptNum = this.readMemory8(currentAddress + 1);
-            // 调用对应的中断处理程序
-            if (!this.handleInterrupt(interruptNum)) {
-                // 中断处理需要阻塞（如等待键盘输入），不推进IP
-                return false;
+            // 推入 FLAGS, CS, IP(下一条指令地址)
+            const nextIP = (this.ip + 2) & 0xFFFF;
+            const flagsVal = this.getFlags();
+            // push FLAGS
+            this.setRegister('sp', (this.getRegister('sp') - 2) & 0xFFFF);
+            this.writeMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')), flagsVal);
+            // push CS
+            this.setRegister('sp', (this.getRegister('sp') - 2) & 0xFFFF);
+            this.writeMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')), this.getSegmentRegister('cs'));
+            // push IP (指向 INT 后面的那条指令)
+            this.setRegister('sp', (this.getRegister('sp') - 2) & 0xFFFF);
+            this.writeMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')), nextIP);
+            // 清除 IF 和 TF
+            this.flags.if = 0;
+            this.flags.tf = 0;
+            // 从 IVT 加载目标 CS:IP
+            const ivtAddr = interruptNum * 4;
+            const newIP = this.memory.read16(ivtAddr);
+            const newCS = this.memory.read16(ivtAddr + 2);
+            this.setSegmentRegister('cs', newCS);
+            this.ip = newIP;
+            // 检查是否跳转到 BIOS 存根，如果是则执行内置处理函数
+            if (newCS === this.biosHandlerBase && this.biosHandlers[newIP]) {
+                if (!this.biosHandlers[newIP]()) {
+                    // 处理器需要阻塞（如等待键盘输入），回退：
+                    // 恢复 SP/CS/IP/FLAGS，让 step 返回 false 以暂停
+                    const savedIP = this.readMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')));
+                    this.setRegister('sp', (this.getRegister('sp') + 2) & 0xFFFF);
+                    const savedCS = this.readMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')));
+                    this.setRegister('sp', (this.getRegister('sp') + 2) & 0xFFFF);
+                    const savedFlags = this.readMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')));
+                    this.setRegister('sp', (this.getRegister('sp') + 2) & 0xFFFF);
+                    this.setSegmentRegister('cs', savedCS);
+                    this.ip = savedIP - 2; // 回退到 INT 指令本身
+                    this.setFlags(savedFlags);
+                    return false;
+                }
+                // 处理成功，执行 IRET: 从栈弹出 IP, CS, FLAGS
+                const retIP = this.readMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')));
+                this.setRegister('sp', (this.getRegister('sp') + 2) & 0xFFFF);
+                const retCS = this.readMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')));
+                this.setRegister('sp', (this.getRegister('sp') + 2) & 0xFFFF);
+                const retFlags = this.readMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')));
+                this.setRegister('sp', (this.getRegister('sp') + 2) & 0xFFFF);
+                this.setSegmentRegister('cs', retCS);
+                this.ip = retIP;
+                this.setFlags(retFlags);
             }
-            instructionLength = 2;
+            instructionLength = 0; // IP 已被设置，不需要再增加
             break;
+        }
+        case 0xcf: { // IRET — 中断返回
+            // pop IP
+            const iretIP = this.readMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')));
+            this.setRegister('sp', (this.getRegister('sp') + 2) & 0xFFFF);
+            // pop CS
+            const iretCS = this.readMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')));
+            this.setRegister('sp', (this.getRegister('sp') + 2) & 0xFFFF);
+            // pop FLAGS
+            const iretFlags = this.readMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')));
+            this.setRegister('sp', (this.getRegister('sp') + 2) & 0xFFFF);
+            this.setSegmentRegister('cs', iretCS);
+            this.ip = iretIP;
+            this.setFlags(iretFlags);
+            instructionLength = 0; // IP 已被设置
+            break;
+        }
         case 0x40: // INC AX
         case 0x41: // INC CX
         case 0x42: // INC DX
@@ -3285,6 +3401,32 @@ CPU8086.prototype.step = function() {
             }
             break;
         }
+        case 0xc4: // LES r16, m16:16
+        case 0xc5: { // LDS r16, m16:16
+            const modrm_c45 = this.readMemory8(currentAddress + 1);
+            const reg_c45 = (modrm_c45 >> 3) & 0x7;
+            const mod_c45 = (modrm_c45 >> 6) & 0x3;
+            const rm_c45 = modrm_c45 & 0x7;
+            const regNames_c45 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+            const dstReg_c45 = regNames_c45[reg_c45];
+
+            if (mod_c45 === 3) {
+                // 无效：LDS/LES不能使用寄存器源
+                break;
+            }
+            const ea_c45 = this.calculateEffectiveAddress(mod_c45, rm_c45, currentAddress);
+            const addr_c45 = this.getMemoryAddress(this.getSegmentRegister('ds'), ea_c45.address);
+            const offsetVal = this.readMemory16(addr_c45);
+            const segmentVal = this.readMemory16(addr_c45 + 2);
+            this.setRegister(dstReg_c45, offsetVal);
+            if (opcode === 0xc5) {
+                this.setSegmentRegister('ds', segmentVal); // LDS
+            } else {
+                this.setSegmentRegister('es', segmentVal); // LES
+            }
+            instructionLength = 2 + ea_c45.displacementSize;
+            break;
+        }
         case 0xc6: // MOV r/m8, imm8
             const modrm_c6 = this.readMemory8(currentAddress + 1);
             const reg_c6 = (modrm_c6 >> 3) & 0x7; // 扩展操作码，必须为0
@@ -3806,6 +3948,21 @@ CPU8086.prototype.step = function() {
             instructionLength = 1;
             break;
         }
+        case 0x6a: { // PUSH imm8 (sign-extended to 16-bit, 80186+)
+            const pushImm8 = this.readMemory8(currentAddress + 1);
+            const pushVal8 = (pushImm8 & 0x80) ? (0xFF00 | pushImm8) : pushImm8; // sign extend
+            this.setRegister('sp', (this.getRegister('sp') - 2) & 0xFFFF);
+            this.writeMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')), pushVal8 & 0xFFFF);
+            instructionLength = 2;
+            break;
+        }
+        case 0x68: { // PUSH imm16 (80186+)
+            const pushImm16 = this.readMemory16(currentAddress + 1);
+            this.setRegister('sp', (this.getRegister('sp') - 2) & 0xFFFF);
+            this.writeMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')), pushImm16);
+            instructionLength = 3;
+            break;
+        }
         case 0x83: // Group: ADD/OR/ADC/SBB/AND/SUB/XOR/CMP r/m16, imm8 (sign-extended)
         {
             const modrm83 = this.readMemory8(currentAddress + 1);
@@ -3970,6 +4127,7 @@ CPU8086.prototype.step = function() {
 
     // 更新指令指针（某些指令已经设置了IP，instructionLength会设为0）
     if (instructionLength > 0) {
+        console.log(`[CPU] CS:${this.getSegmentRegister('cs').toString(16)} IP:0x${this.ip.toString(16).padStart(4,'0')} opcode=0x${opcode.toString(16).padStart(2,'0')} instrLen=${instructionLength} -> newIP=0x${(this.ip+instructionLength).toString(16).padStart(4,'0')}`);
         this.ip += instructionLength;
     }
 
@@ -4019,13 +4177,7 @@ CPU8086.prototype.getCurrentAddress = function() {
     return this.getMemoryAddress(this.getSegmentRegister('cs'), this.ip);
 }
 
-CPU8086.prototype.handleInterrupt = function(interruptNum) {
-    if (interruptNum === 0x21) {
-        return this.handleInt21();
-    } else if (interruptNum === 0x16) {
-        return this.handleInt16();
-    } else {
-        console.warn(`未实现的中断: INT ${interruptNum.toString(16).padStart(2, '0')}`);
-        return true;
-    }
+// 触发硬件中断（加入待处理队列）
+CPU8086.prototype.triggerInterrupt = function(interruptNum) {
+    this.pendingInterrupts.push(interruptNum);
 };
