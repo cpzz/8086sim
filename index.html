@@ -12,16 +12,16 @@
 
         <!-- 主内容区：左右布局 -->
         <div class="main-content">
-            <!-- 左侧面板：屏幕/寄存器/内存 -->
+            <!-- 左侧面板：寄存器/内存/屏幕 -->
             <div class="left-panel">
             <div class="left-tabs">
-                <button class="left-tab active" data-tab="screen">屏幕</button>
-                <button class="left-tab" data-tab="registers">寄存器</button>
+                <button class="left-tab active" data-tab="registers">寄存器</button>
                 <button class="left-tab" data-tab="memory">内存</button>
+                <button class="left-tab" data-tab="screen">屏幕</button>
             </div>
 
             <!-- 屏幕tab -->
-            <div class="left-tab-content active" data-content="screen">
+            <div class="left-tab-content" data-content="screen">
                 <div class="display-panel">
                     <div id="ui-display-grid" class="ui-display-grid">
                         <!-- 屏幕内容将在这里动态生成 -->
@@ -30,7 +30,7 @@
             </div>
 
             <!-- 寄存器tab -->
-            <div class="left-tab-content" data-content="registers">
+            <div class="left-tab-content active" data-content="registers">
                 <div class="registers-panel">
                     <div class="register-section">
                         <h3>通用寄存器</h3>
@@ -166,10 +166,8 @@
                     </div>
 
                     <div class="memory-controls">
-                        <input type="text" id="memory-address-input" placeholder="偏移地址 (例如: 0x1000)">
+                        <input type="text" id="memory-address-input" placeholder="偏移地址 (例如: 1000)">
                         <button id="memory-go-btn">前往</button>
-                        <button id="memory-prev-btn">上页</button>
-                        <button id="memory-next-btn">下页</button>
                     </div>
                     <div id="memory-grid" class="memory-grid">
                         <!-- 内存内容将在这里动态生成 -->

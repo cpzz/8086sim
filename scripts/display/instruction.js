@@ -58,8 +58,11 @@ function updateInstructionsDisplay() {
 
         const lowerLine = trimmedLine.toLowerCase();
 
-        // 检查是否是伪指令
-        const isDirective = 
+        // 检查是否是 PROC/ENDP 伪指令
+        const isProcDirective = lowerLine.includes(' proc') || lowerLine.includes(' endp');
+
+        // 检查是否是其他伪指令
+        const isDirective = isProcDirective ||
             lowerLine.startsWith('.model') ||
             lowerLine.startsWith('.stack') ||
             lowerLine.startsWith('.data') ||
@@ -70,14 +73,12 @@ function updateInstructionsDisplay() {
             lowerLine.endsWith(' ends') ||
             lowerLine.includes(' equ ') ||
             lowerLine === 'even' ||
-            lowerLine.startsWith('org ') ||
-            lowerLine.includes(' proc') ||
-            lowerLine.includes(' endp');
+            lowerLine.startsWith('org ');
 
         if (isDirective) {
             // 显示伪指令
             const rowElement = document.createElement('div');
-            rowElement.className = 'instructions-table-row directive-row';
+            rowElement.className = 'instructions-table-row directive-row' + (isProcDirective ? ' proc-row' : '');
 
             // 解析原始行，分离汇编代码和注释
             const commentIndex = trimmedLine.indexOf(';');
@@ -100,10 +101,19 @@ function updateInstructionsDisplay() {
             machineCodeCell.textContent = '';
             rowElement.appendChild(machineCodeCell);
 
-            // 创建汇编代码列
+            // 创建汇编代码列（PROC/ENDP 只有标签名绿色粗斜体）
             const assemblyCell = document.createElement('div');
             assemblyCell.className = 'instructions-table-cell assembly';
-            assemblyCell.textContent = assemblyCode;
+            if (isProcDirective) {
+                const procMatch = assemblyCode.match(/^(\S+)(\s+(?:proc|endp).*)$/i);
+                if (procMatch) {
+                    assemblyCell.innerHTML = '<span class="label-ref">' + procMatch[1] + '</span>' + procMatch[2];
+                } else {
+                    assemblyCell.textContent = assemblyCode;
+                }
+            } else {
+                assemblyCell.textContent = assemblyCode;
+            }
             rowElement.appendChild(assemblyCell);
 
             // 创建注释列
@@ -211,11 +221,10 @@ function updateInstructionsDisplay() {
                 const rowElement = document.createElement('div');
                 rowElement.className = 'instructions-table-row label-row';
 
-                // 创建地址列
+                // 创建地址列（纯标签不显示偏移地址）
                 const addressCell = document.createElement('div');
-                addressCell.className = 'instructions-table-cell address label-address';
-                const labelAddrStr = 'CS:' + labelAddress.toString(16).toUpperCase().padStart(5, '0');
-                addressCell.textContent = labelAddrStr;
+                addressCell.className = 'instructions-table-cell address';
+                addressCell.textContent = '';
                 rowElement.appendChild(addressCell);
 
                 // 创建机器代码列（标签行为空）
@@ -257,13 +266,12 @@ function updateInstructionsDisplay() {
             if (typeof labelAddress === 'number') {
                 // 显示PROC/ENDP标签
                 const rowElement = document.createElement('div');
-                rowElement.className = 'instructions-table-row label-row';
+                rowElement.className = 'instructions-table-row proc-row';
 
-                // 创建地址列
+                // 创建地址列（不显示偏移地址）
                 const addressCell = document.createElement('div');
-                addressCell.className = 'instructions-table-cell address label-address';
-                const labelAddrStr = 'CS:' + labelAddress.toString(16).toUpperCase().padStart(5, '0');
-                addressCell.textContent = labelAddrStr;
+                addressCell.className = 'instructions-table-cell address';
+                addressCell.textContent = '';
                 rowElement.appendChild(addressCell);
 
                 // 创建机器代码列（标签行为空）
@@ -272,12 +280,15 @@ function updateInstructionsDisplay() {
                 machineCodeCell.textContent = '';
                 rowElement.appendChild(machineCodeCell);
 
-                // 创建汇编代码列（标签行显示标签名称）
+                // 创建汇编代码列（只有标签名绿色粗斜体）
                 const assemblyCell = document.createElement('div');
-                assemblyCell.className = 'instructions-table-cell assembly label-assembly';
-                assemblyCell.textContent = labelName + ':';
-                assemblyCell.style.fontWeight = 'bold';
-                assemblyCell.style.color = '#0066cc';
+                assemblyCell.className = 'instructions-table-cell assembly';
+                const procLabelMatch = trimmedLine.match(/^(\S+?:?)(\s+(?:proc|endp).*)$/i);
+                if (procLabelMatch) {
+                    assemblyCell.innerHTML = '<span class="label-ref">' + procLabelMatch[1] + '</span>' + procLabelMatch[2];
+                } else {
+                    assemblyCell.textContent = trimmedLine;
+                }
                 rowElement.appendChild(assemblyCell);
 
                 // 创建注释列（标签行为空）
@@ -321,29 +332,19 @@ function updateInstructionsDisplay() {
             const addressStr = 'CS:' + foundInstruction.address.toString(16).toUpperCase().padStart(5, '0');
             const machineCodeStr = foundInstruction.machineCode.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
 
-            // 构建汇编代码显示（包括操作码和操作数）
-            let assemblyCode = foundInstruction.opcode || '';
-            if (foundInstruction.operands && foundInstruction.operands.length > 0) {
-                // 尝试使用原始大小写的标签名
-                const processedOperands = foundInstruction.operands.map(op => {
-                    // 检查操作数是否是标签（字母组成，可能是过程名）
-                    if (typeof op === 'string' && /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(op)) {
-                        // 检查assembler是否有原始大小写的标签名
-                        if (assembler.symbolOriginalCase && assembler.symbolOriginalCase[op.toLowerCase()]) {
-                            return assembler.symbolOriginalCase[op.toLowerCase()];
-                        }
-                    }
-                    return op; // 如果不是标签或找不到原始大小写，则返回原值
-                });
-                assemblyCode += ' ' + processedOperands.join(', ');
-            }
-
-            // 从原始行提取注释
+            // 从原始行提取汇编代码和注释
             const originalLine = foundInstruction.originalLine || '';
             const commentIndex = originalLine.indexOf(';');
+            let assemblyCode = originalLine.trim();
             let comment = '';
             if (commentIndex !== -1) {
+                assemblyCode = originalLine.substring(0, commentIndex).trim();
                 comment = originalLine.substring(commentIndex + 1).trim();
+            }
+            // 去掉行首的标签（如 "label: mov ax, bx" -> "mov ax, bx"）
+            const labelMatch = assemblyCode.match(/^[a-zA-Z_][a-zA-Z0-9_]*:\s*/);
+            if (labelMatch) {
+                assemblyCode = assemblyCode.substring(labelMatch[0].length);
             }
 
             // 创建地址列
@@ -358,10 +359,37 @@ function updateInstructionsDisplay() {
             machineCodeCell.textContent = machineCodeStr;
             rowElement.appendChild(machineCodeCell);
 
-            // 创建汇编代码列
+            // 创建汇编代码列（标签名用绿色粗斜体显示）
             const assemblyCell = document.createElement('div');
             assemblyCell.className = 'instructions-table-cell assembly';
-            assemblyCell.textContent = assemblyCode;
+            // 检查是否含有标签引用（CALL/JMP/Jxx/LOOP 等指令的操作数）
+            const asmLower = assemblyCode.toLowerCase().trimStart();
+            const branchOpcodes = ['call', 'jmp', 'jz', 'je', 'jnz', 'jne', 'jl', 'jnge', 'jnl', 'jge',
+                'jg', 'jnle', 'jng', 'jle', 'ja', 'jnbe', 'jna', 'jbe', 'jb', 'jnae', 'jc', 'jnc', 'jnb', 'jae',
+                'js', 'jns', 'jo', 'jno', 'jp', 'jpe', 'jnp', 'jpo', 'jcxz', 'loop', 'loope', 'loopz', 'loopne', 'loopnz'];
+            let labelHighlighted = false;
+            for (const bop of branchOpcodes) {
+                if (asmLower.startsWith(bop + ' ') || asmLower.startsWith(bop + '\t')) {
+                    const opcodeLen = bop.length;
+                    const leading = assemblyCode.match(/^\s*/)[0];
+                    const opcodePart = assemblyCode.substring(leading.length, leading.length + opcodeLen);
+                    const rest = assemblyCode.substring(leading.length + opcodeLen);
+                    const restMatch = rest.match(/^(\s+)(\S+)(.*)$/);
+                    if (restMatch) {
+                        const space = restMatch[1];
+                        const labelName = restMatch[2];
+                        const trailing = restMatch[3];
+                        assemblyCell.innerHTML = leading + opcodePart + space + '<span class="label-ref">' + labelName + '</span>' + trailing;
+                    } else {
+                        assemblyCell.textContent = assemblyCode;
+                    }
+                    labelHighlighted = true;
+                    break;
+                }
+            }
+            if (!labelHighlighted) {
+                assemblyCell.textContent = assemblyCode;
+            }
             rowElement.appendChild(assemblyCell);
 
             // 创建注释列

@@ -42,9 +42,13 @@ CPU8086.prototype.reset = function() {
     // 清除内存操作跟踪
     this.clearMemoryOperations();
 
+    // 重置各段内存访问跟踪
+    this.lastSegmentAccessAddress = { cs: -1, ds: -1, ss: -1, es: -1 };
+
     // 重置键盘输入状态
     this.keyboardBuffer = [];
     this.waitingForKey = false;
+    this._stringInputState = null;
 
     // 停止运行
     this.running = false;
@@ -62,16 +66,448 @@ CPU8086.prototype.step = function() {
     let instructionLength = 1;
 
     switch (opcode) {
-        case 0x00: // ADD Eb, Gb
-            // 简单实现，实际需要更复杂的寻址模式处理
-            instructionLength = 2;
+        case 0x00: { // ADD Eb, Gb (ADD r/m8, r8)
+            const modrm00 = this.readMemory8(currentAddress + 1);
+            const reg00 = (modrm00 >> 3) & 0x7;
+            const mod00 = (modrm00 >> 6) & 0x3;
+            const rm00 = modrm00 & 0x7;
+            const reg8Names00 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
+            const srcVal00 = this.getRegister8(reg8Names00[reg00]);
+            if (mod00 === 3) {
+                const dstVal00 = this.getRegister8(reg8Names00[rm00]);
+                const res00 = dstVal00 + srcVal00;
+                this.setRegister8(reg8Names00[rm00], res00 & 0xFF);
+                this.updateFlags8(res00, dstVal00, srcVal00, 'add');
+                instructionLength = 2;
+            } else {
+                const ea00 = this.calculateEffectiveAddress(mod00, rm00, currentAddress);
+                const addr00 = this.getMemoryAddress(this.getSegmentRegister('ds'), ea00.address);
+                const dstVal00 = this.readMemory8(addr00);
+                const res00 = dstVal00 + srcVal00;
+                this.writeMemory8(addr00, res00 & 0xFF);
+                this.updateFlags8(res00, dstVal00, srcVal00, 'add');
+                instructionLength = 2 + ea00.displacementSize;
+            }
             break;
-        case 0x02: // ADD Gb, Eb
-            instructionLength = 2;
+        }
+        case 0x02: { // ADD Gb, Eb (ADD r8, r/m8)
+            const modrm02 = this.readMemory8(currentAddress + 1);
+            const reg02 = (modrm02 >> 3) & 0x7;
+            const mod02 = (modrm02 >> 6) & 0x3;
+            const rm02 = modrm02 & 0x7;
+            const reg8Names02 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
+            const dstVal02 = this.getRegister8(reg8Names02[reg02]);
+            let srcVal02;
+            if (mod02 === 3) {
+                srcVal02 = this.getRegister8(reg8Names02[rm02]);
+                instructionLength = 2;
+            } else {
+                const ea02 = this.calculateEffectiveAddress(mod02, rm02, currentAddress);
+                const addr02 = this.getMemoryAddress(this.getSegmentRegister('ds'), ea02.address);
+                srcVal02 = this.readMemory8(addr02);
+                instructionLength = 2 + ea02.displacementSize;
+            }
+            const res02 = dstVal02 + srcVal02;
+            this.setRegister8(reg8Names02[reg02], res02 & 0xFF);
+            this.updateFlags8(res02, dstVal02, srcVal02, 'add');
             break;
-        case 0x03: // ADD Gv, Ev
-            instructionLength = 2;
+        }
+        case 0x03: { // ADD Gv, Ev (ADD r16, r/m16)
+            const modrm03 = this.readMemory8(currentAddress + 1);
+            const reg03 = (modrm03 >> 3) & 0x7;
+            const mod03 = (modrm03 >> 6) & 0x3;
+            const rm03 = modrm03 & 0x7;
+            const regNames03 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+            const srcVal03 = this.readRM16(mod03, rm03, currentAddress);
+            const dstVal03 = this.getRegister(regNames03[reg03]);
+            const res03 = dstVal03 + srcVal03;
+            this.setRegister(regNames03[reg03], res03);
+            this.updateFlags16(res03, dstVal03, srcVal03, 'add');
+            if (mod03 === 3) {
+                instructionLength = 2;
+            } else {
+                const ea03 = this.calculateEffectiveAddress(mod03, rm03, currentAddress);
+                instructionLength = 2 + ea03.displacementSize;
+            }
             break;
+        }
+        case 0x08: { // OR Eb, Gb (OR r/m8, r8)
+            const modrm08 = this.readMemory8(currentAddress + 1);
+            const reg08 = (modrm08 >> 3) & 0x7;
+            const mod08 = (modrm08 >> 6) & 0x3;
+            const rm08 = modrm08 & 0x7;
+            const reg8Names08 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
+            const srcVal08 = this.getRegister8(reg8Names08[reg08]);
+            if (mod08 === 3) {
+                const dstVal08 = this.getRegister8(reg8Names08[rm08]);
+                const res08 = dstVal08 | srcVal08;
+                this.setRegister8(reg8Names08[rm08], res08 & 0xFF);
+                this.updateFlags8(res08, dstVal08, srcVal08, 'or');
+                instructionLength = 2;
+            } else {
+                const ea08 = this.calculateEffectiveAddress(mod08, rm08, currentAddress);
+                const addr08 = this.getMemoryAddress(this.getSegmentRegister('ds'), ea08.address);
+                const dstVal08 = this.readMemory8(addr08);
+                const res08 = dstVal08 | srcVal08;
+                this.writeMemory8(addr08, res08 & 0xFF);
+                this.updateFlags8(res08, dstVal08, srcVal08, 'or');
+                instructionLength = 2 + ea08.displacementSize;
+            }
+            break;
+        }
+        case 0x0a: { // OR Gb, Eb (OR r8, r/m8)
+            const modrm0a = this.readMemory8(currentAddress + 1);
+            const reg0a = (modrm0a >> 3) & 0x7;
+            const mod0a = (modrm0a >> 6) & 0x3;
+            const rm0a = modrm0a & 0x7;
+            const reg8Names0a = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
+            const dstVal0a = this.getRegister8(reg8Names0a[reg0a]);
+            let srcVal0a;
+            if (mod0a === 3) {
+                srcVal0a = this.getRegister8(reg8Names0a[rm0a]);
+                instructionLength = 2;
+            } else {
+                const ea0a = this.calculateEffectiveAddress(mod0a, rm0a, currentAddress);
+                const addr0a = this.getMemoryAddress(this.getSegmentRegister('ds'), ea0a.address);
+                srcVal0a = this.readMemory8(addr0a);
+                instructionLength = 2 + ea0a.displacementSize;
+            }
+            const res0a = dstVal0a | srcVal0a;
+            this.setRegister8(reg8Names0a[reg0a], res0a & 0xFF);
+            this.updateFlags8(res0a, dstVal0a, srcVal0a, 'or');
+            break;
+        }
+        case 0x0b: { // OR Gv, Ev (OR r16, r/m16)
+            const modrm0b = this.readMemory8(currentAddress + 1);
+            const reg0b = (modrm0b >> 3) & 0x7;
+            const mod0b = (modrm0b >> 6) & 0x3;
+            const rm0b = modrm0b & 0x7;
+            const regToName0b = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+            const srcVal0b = this.readRM16(mod0b, rm0b, currentAddress);
+            const dstVal0b = this.getRegister(regToName0b[reg0b]);
+            const res0b = dstVal0b | srcVal0b;
+            this.setRegister(regToName0b[reg0b], res0b);
+            this.updateFlags16(res0b, dstVal0b, srcVal0b, 'or');
+            if (mod0b === 3) {
+                instructionLength = 2;
+            } else {
+                const ea0b = this.calculateEffectiveAddress(mod0b, rm0b, currentAddress);
+                instructionLength = 2 + ea0b.displacementSize;
+            }
+            break;
+        }
+        case 0x10: { // ADC Eb, Gb (ADC r/m8, r8)
+            const modrm10 = this.readMemory8(currentAddress + 1);
+            const reg10 = (modrm10 >> 3) & 0x7;
+            const mod10 = (modrm10 >> 6) & 0x3;
+            const rm10 = modrm10 & 0x7;
+            const reg8Names10 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
+            const srcVal10 = this.getRegister8(reg8Names10[reg10]);
+            const carry10 = this.flags.cf;
+            if (mod10 === 3) {
+                const dstVal10 = this.getRegister8(reg8Names10[rm10]);
+                const res10 = dstVal10 + srcVal10 + carry10;
+                this.setRegister8(reg8Names10[rm10], res10 & 0xFF);
+                this.updateFlags8(res10, dstVal10, srcVal10 + carry10, 'add');
+                instructionLength = 2;
+            } else {
+                const ea10 = this.calculateEffectiveAddress(mod10, rm10, currentAddress);
+                const addr10 = this.getMemoryAddress(this.getSegmentRegister('ds'), ea10.address);
+                const dstVal10 = this.readMemory8(addr10);
+                const res10 = dstVal10 + srcVal10 + carry10;
+                this.writeMemory8(addr10, res10 & 0xFF);
+                this.updateFlags8(res10, dstVal10, srcVal10 + carry10, 'add');
+                instructionLength = 2 + ea10.displacementSize;
+            }
+            break;
+        }
+        case 0x11: { // ADC Ev, Gv (ADC r/m16, r16)
+            const modrm11 = this.readMemory8(currentAddress + 1);
+            const reg11 = (modrm11 >> 3) & 0x7;
+            const mod11 = (modrm11 >> 6) & 0x3;
+            const rm11 = modrm11 & 0x7;
+            const regToName11 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+            const srcVal11 = this.getRegister(regToName11[reg11]);
+            const dstVal11 = this.readRM16(mod11, rm11, currentAddress);
+            const carry11 = this.flags.cf;
+            const res11 = dstVal11 + srcVal11 + carry11;
+            this.writeRM16(mod11, rm11, currentAddress, res11);
+            this.updateFlags16(res11, dstVal11, srcVal11 + carry11, 'add');
+            if (mod11 === 3) {
+                instructionLength = 2;
+            } else {
+                const ea11 = this.calculateEffectiveAddress(mod11, rm11, currentAddress);
+                instructionLength = 2 + ea11.displacementSize;
+            }
+            break;
+        }
+        case 0x12: { // ADC Gb, Eb (ADC r8, r/m8)
+            const modrm12 = this.readMemory8(currentAddress + 1);
+            const reg12 = (modrm12 >> 3) & 0x7;
+            const mod12 = (modrm12 >> 6) & 0x3;
+            const rm12 = modrm12 & 0x7;
+            const reg8Names12 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
+            const dstVal12 = this.getRegister8(reg8Names12[reg12]);
+            const carry12 = this.flags.cf;
+            let srcVal12;
+            if (mod12 === 3) {
+                srcVal12 = this.getRegister8(reg8Names12[rm12]);
+                instructionLength = 2;
+            } else {
+                const ea12 = this.calculateEffectiveAddress(mod12, rm12, currentAddress);
+                const addr12 = this.getMemoryAddress(this.getSegmentRegister('ds'), ea12.address);
+                srcVal12 = this.readMemory8(addr12);
+                instructionLength = 2 + ea12.displacementSize;
+            }
+            const res12 = dstVal12 + srcVal12 + carry12;
+            this.setRegister8(reg8Names12[reg12], res12 & 0xFF);
+            this.updateFlags8(res12, dstVal12, srcVal12 + carry12, 'add');
+            break;
+        }
+        case 0x18: { // SBB Eb, Gb (SBB r/m8, r8)
+            const modrm18 = this.readMemory8(currentAddress + 1);
+            const reg18 = (modrm18 >> 3) & 0x7;
+            const mod18 = (modrm18 >> 6) & 0x3;
+            const rm18 = modrm18 & 0x7;
+            const reg8Names18 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
+            const srcVal18 = this.getRegister8(reg8Names18[reg18]);
+            const carry18 = this.flags.cf;
+            if (mod18 === 3) {
+                const dstVal18 = this.getRegister8(reg8Names18[rm18]);
+                const res18 = dstVal18 - srcVal18 - carry18;
+                this.setRegister8(reg8Names18[rm18], res18 & 0xFF);
+                this.updateFlags8(res18, dstVal18, srcVal18 + carry18, 'sub');
+                instructionLength = 2;
+            } else {
+                const ea18 = this.calculateEffectiveAddress(mod18, rm18, currentAddress);
+                const addr18 = this.getMemoryAddress(this.getSegmentRegister('ds'), ea18.address);
+                const dstVal18 = this.readMemory8(addr18);
+                const res18 = dstVal18 - srcVal18 - carry18;
+                this.writeMemory8(addr18, res18 & 0xFF);
+                this.updateFlags8(res18, dstVal18, srcVal18 + carry18, 'sub');
+                instructionLength = 2 + ea18.displacementSize;
+            }
+            break;
+        }
+        case 0x1a: { // SBB Gb, Eb (SBB r8, r/m8)
+            const modrm1a = this.readMemory8(currentAddress + 1);
+            const reg1a = (modrm1a >> 3) & 0x7;
+            const mod1a = (modrm1a >> 6) & 0x3;
+            const rm1a = modrm1a & 0x7;
+            const reg8Names1a = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
+            const dstVal1a = this.getRegister8(reg8Names1a[reg1a]);
+            const carry1a = this.flags.cf;
+            let srcVal1a;
+            if (mod1a === 3) {
+                srcVal1a = this.getRegister8(reg8Names1a[rm1a]);
+                instructionLength = 2;
+            } else {
+                const ea1a = this.calculateEffectiveAddress(mod1a, rm1a, currentAddress);
+                const addr1a = this.getMemoryAddress(this.getSegmentRegister('ds'), ea1a.address);
+                srcVal1a = this.readMemory8(addr1a);
+                instructionLength = 2 + ea1a.displacementSize;
+            }
+            const res1a = dstVal1a - srcVal1a - carry1a;
+            this.setRegister8(reg8Names1a[reg1a], res1a & 0xFF);
+            this.updateFlags8(res1a, dstVal1a, srcVal1a + carry1a, 'sub');
+            break;
+        }
+        case 0x20: { // AND Eb, Gb (AND r/m8, r8)
+            const modrm20 = this.readMemory8(currentAddress + 1);
+            const reg20 = (modrm20 >> 3) & 0x7;
+            const mod20 = (modrm20 >> 6) & 0x3;
+            const rm20 = modrm20 & 0x7;
+            const reg8Names20 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
+            const srcVal20 = this.getRegister8(reg8Names20[reg20]);
+            if (mod20 === 3) {
+                const dstVal20 = this.getRegister8(reg8Names20[rm20]);
+                const res20 = dstVal20 & srcVal20;
+                this.setRegister8(reg8Names20[rm20], res20 & 0xFF);
+                this.updateFlags8(res20, dstVal20, srcVal20, 'and');
+                instructionLength = 2;
+            } else {
+                const ea20 = this.calculateEffectiveAddress(mod20, rm20, currentAddress);
+                const addr20 = this.getMemoryAddress(this.getSegmentRegister('ds'), ea20.address);
+                const dstVal20 = this.readMemory8(addr20);
+                const res20 = dstVal20 & srcVal20;
+                this.writeMemory8(addr20, res20 & 0xFF);
+                this.updateFlags8(res20, dstVal20, srcVal20, 'and');
+                instructionLength = 2 + ea20.displacementSize;
+            }
+            break;
+        }
+        case 0x22: { // AND Gb, Eb (AND r8, r/m8)
+            const modrm22 = this.readMemory8(currentAddress + 1);
+            const reg22 = (modrm22 >> 3) & 0x7;
+            const mod22 = (modrm22 >> 6) & 0x3;
+            const rm22 = modrm22 & 0x7;
+            const reg8Names22 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
+            const dstVal22 = this.getRegister8(reg8Names22[reg22]);
+            let srcVal22;
+            if (mod22 === 3) {
+                srcVal22 = this.getRegister8(reg8Names22[rm22]);
+                instructionLength = 2;
+            } else {
+                const ea22 = this.calculateEffectiveAddress(mod22, rm22, currentAddress);
+                const addr22 = this.getMemoryAddress(this.getSegmentRegister('ds'), ea22.address);
+                srcVal22 = this.readMemory8(addr22);
+                instructionLength = 2 + ea22.displacementSize;
+            }
+            const res22 = dstVal22 & srcVal22;
+            this.setRegister8(reg8Names22[reg22], res22 & 0xFF);
+            this.updateFlags8(res22, dstVal22, srcVal22, 'and');
+            break;
+        }
+        case 0x28: { // SUB Eb, Gb (SUB r/m8, r8)
+            const modrm28 = this.readMemory8(currentAddress + 1);
+            const reg28 = (modrm28 >> 3) & 0x7;
+            const mod28 = (modrm28 >> 6) & 0x3;
+            const rm28 = modrm28 & 0x7;
+            const reg8Names28 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
+            const srcVal28 = this.getRegister8(reg8Names28[reg28]);
+            if (mod28 === 3) {
+                const dstVal28 = this.getRegister8(reg8Names28[rm28]);
+                const res28 = dstVal28 - srcVal28;
+                this.setRegister8(reg8Names28[rm28], res28 & 0xFF);
+                this.updateFlags8(res28, dstVal28, srcVal28, 'sub');
+                instructionLength = 2;
+            } else {
+                const ea28 = this.calculateEffectiveAddress(mod28, rm28, currentAddress);
+                const addr28 = this.getMemoryAddress(this.getSegmentRegister('ds'), ea28.address);
+                const dstVal28 = this.readMemory8(addr28);
+                const res28 = dstVal28 - srcVal28;
+                this.writeMemory8(addr28, res28 & 0xFF);
+                this.updateFlags8(res28, dstVal28, srcVal28, 'sub');
+                instructionLength = 2 + ea28.displacementSize;
+            }
+            break;
+        }
+        case 0x2a: { // SUB Gb, Eb (SUB r8, r/m8)
+            const modrm2a = this.readMemory8(currentAddress + 1);
+            const reg2a = (modrm2a >> 3) & 0x7;
+            const mod2a = (modrm2a >> 6) & 0x3;
+            const rm2a = modrm2a & 0x7;
+            const reg8Names2a = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
+            const dstVal2a = this.getRegister8(reg8Names2a[reg2a]);
+            let srcVal2a;
+            if (mod2a === 3) {
+                srcVal2a = this.getRegister8(reg8Names2a[rm2a]);
+                instructionLength = 2;
+            } else {
+                const ea2a = this.calculateEffectiveAddress(mod2a, rm2a, currentAddress);
+                const addr2a = this.getMemoryAddress(this.getSegmentRegister('ds'), ea2a.address);
+                srcVal2a = this.readMemory8(addr2a);
+                instructionLength = 2 + ea2a.displacementSize;
+            }
+            const res2a = dstVal2a - srcVal2a;
+            this.setRegister8(reg8Names2a[reg2a], res2a & 0xFF);
+            this.updateFlags8(res2a, dstVal2a, srcVal2a, 'sub');
+            break;
+        }
+        case 0x30: { // XOR Eb, Gb (XOR r/m8, r8)
+            const modrm30 = this.readMemory8(currentAddress + 1);
+            const reg30 = (modrm30 >> 3) & 0x7;
+            const mod30 = (modrm30 >> 6) & 0x3;
+            const rm30 = modrm30 & 0x7;
+            const reg8Names30 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
+            const srcVal30 = this.getRegister8(reg8Names30[reg30]);
+            if (mod30 === 3) {
+                const dstVal30 = this.getRegister8(reg8Names30[rm30]);
+                const res30 = dstVal30 ^ srcVal30;
+                this.setRegister8(reg8Names30[rm30], res30 & 0xFF);
+                this.updateFlags8(res30, dstVal30, srcVal30, 'xor');
+                instructionLength = 2;
+            } else {
+                const ea30 = this.calculateEffectiveAddress(mod30, rm30, currentAddress);
+                const addr30 = this.getMemoryAddress(this.getSegmentRegister('ds'), ea30.address);
+                const dstVal30 = this.readMemory8(addr30);
+                const res30 = dstVal30 ^ srcVal30;
+                this.writeMemory8(addr30, res30 & 0xFF);
+                this.updateFlags8(res30, dstVal30, srcVal30, 'xor');
+                instructionLength = 2 + ea30.displacementSize;
+            }
+            break;
+        }
+        case 0x32: { // XOR Gb, Eb (XOR r8, r/m8)
+            const modrm32 = this.readMemory8(currentAddress + 1);
+            const reg32 = (modrm32 >> 3) & 0x7;
+            const mod32 = (modrm32 >> 6) & 0x3;
+            const rm32 = modrm32 & 0x7;
+            const reg8Names32 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
+            const dstVal32 = this.getRegister8(reg8Names32[reg32]);
+            let srcVal32;
+            if (mod32 === 3) {
+                srcVal32 = this.getRegister8(reg8Names32[rm32]);
+                instructionLength = 2;
+            } else {
+                const ea32 = this.calculateEffectiveAddress(mod32, rm32, currentAddress);
+                const addr32 = this.getMemoryAddress(this.getSegmentRegister('ds'), ea32.address);
+                srcVal32 = this.readMemory8(addr32);
+                instructionLength = 2 + ea32.displacementSize;
+            }
+            const res32 = dstVal32 ^ srcVal32;
+            this.setRegister8(reg8Names32[reg32], res32 & 0xFF);
+            this.updateFlags8(res32, dstVal32, srcVal32, 'xor');
+            break;
+        }
+        case 0x33: { // XOR Gv, Ev (XOR r16, r/m16)
+            const modrm33 = this.readMemory8(currentAddress + 1);
+            const reg33 = (modrm33 >> 3) & 0x7;
+            const mod33 = (modrm33 >> 6) & 0x3;
+            const rm33 = modrm33 & 0x7;
+            const regToName33 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+            const srcVal33 = this.readRM16(mod33, rm33, currentAddress);
+            const dstVal33 = this.getRegister(regToName33[reg33]);
+            const res33 = dstVal33 ^ srcVal33;
+            this.setRegister(regToName33[reg33], res33);
+            this.updateFlags16(res33, dstVal33, srcVal33, 'xor');
+            if (mod33 === 3) {
+                instructionLength = 2;
+            } else {
+                const ea33 = this.calculateEffectiveAddress(mod33, rm33, currentAddress);
+                instructionLength = 2 + ea33.displacementSize;
+            }
+            break;
+        }
+        case 0x38: { // CMP Eb, Gb (CMP r/m8, r8)
+            const modrm38 = this.readMemory8(currentAddress + 1);
+            const reg38 = (modrm38 >> 3) & 0x7;
+            const mod38 = (modrm38 >> 6) & 0x3;
+            const rm38 = modrm38 & 0x7;
+            const reg8Names38 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
+            const srcVal38 = this.getRegister8(reg8Names38[reg38]);
+            let dstVal38;
+            if (mod38 === 3) {
+                dstVal38 = this.getRegister8(reg8Names38[rm38]);
+                instructionLength = 2;
+            } else {
+                const ea38 = this.calculateEffectiveAddress(mod38, rm38, currentAddress);
+                const addr38 = this.getMemoryAddress(this.getSegmentRegister('ds'), ea38.address);
+                dstVal38 = this.readMemory8(addr38);
+                instructionLength = 2 + ea38.displacementSize;
+            }
+            const res38 = dstVal38 - srcVal38;
+            this.updateFlags8(res38, dstVal38, srcVal38, 'sub');
+            break;
+        }
+        case 0x3b: { // CMP Gv, Ev (CMP r16, r/m16)
+            const modrm3b = this.readMemory8(currentAddress + 1);
+            const reg3b = (modrm3b >> 3) & 0x7;
+            const mod3b = (modrm3b >> 6) & 0x3;
+            const rm3b = modrm3b & 0x7;
+            const regToName3b = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+            const srcVal3b = this.readRM16(mod3b, rm3b, currentAddress);
+            const dstVal3b = this.getRegister(regToName3b[reg3b]);
+            const res3b = dstVal3b - srcVal3b;
+            this.updateFlags16(res3b, dstVal3b, srcVal3b, 'sub');
+            if (mod3b === 3) {
+                instructionLength = 2;
+            } else {
+                const ea3b = this.calculateEffectiveAddress(mod3b, rm3b, currentAddress);
+                instructionLength = 2 + ea3b.displacementSize;
+            }
+            break;
+        }
         case 0x04: { // ADD AL, Ib
             const imm8 = this.readMemory8(currentAddress + 1);
             const al = this.getRegister('ax') & 0xff;
@@ -427,15 +863,17 @@ CPU8086.prototype.step = function() {
                 // 寄存器到寄存器 XCHG
                 const srcValue87 = this.getRegister(regToName87[reg87]);
                 const dstValue87 = this.getRegister(rmToName87[rm87]);
-                // 交换值
                 this.setRegister(rmToName87[rm87], srcValue87);
                 this.setRegister(regToName87[reg87], dstValue87);
-                // XCHG 不影响标志位
                 instructionLength = 2;
             } else {
-                console.error(`执行错误: XCHG 不支持的寻址模式 mod=${mod87}`);
-                this.running = false;
-                return false;
+                const ea87 = this.calculateEffectiveAddress(mod87, rm87, currentAddress);
+                const addr87 = this.getMemoryAddress(this.getSegmentRegister('ds'), ea87.address);
+                const regVal87 = this.getRegister(regToName87[reg87]);
+                const memVal87 = this.readMemory16(addr87);
+                this.writeMemory16(addr87, regVal87);
+                this.setRegister(regToName87[reg87], memVal87);
+                instructionLength = 2 + ea87.displacementSize;
             }
             break;
         case 0x86: // XCHG r/m8, r8
@@ -449,18 +887,19 @@ CPU8086.prototype.step = function() {
             const rmToName86 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
 
             if (mod86 === 3) {
-                // 寄存器到寄存器 XCHG (8位)
                 const srcValue86 = this.getRegister8(regToName86[reg86]);
                 const dstValue86 = this.getRegister8(rmToName86[rm86]);
-                // 交换值
                 this.setRegister8(rmToName86[rm86], srcValue86 & 0xff);
                 this.setRegister8(regToName86[reg86], dstValue86 & 0xff);
-                // XCHG 不影响标志位
                 instructionLength = 2;
             } else {
-                console.error(`执行错误: XCHG 不支持的寻址模式 mod=${mod86}`);
-                this.running = false;
-                return false;
+                const ea86 = this.calculateEffectiveAddress(mod86, rm86, currentAddress);
+                const addr86 = this.getMemoryAddress(this.getSegmentRegister('ds'), ea86.address);
+                const regVal86 = this.getRegister8(regToName86[reg86]);
+                const memVal86 = this.readMemory8(addr86);
+                this.writeMemory8(addr86, regVal86);
+                this.setRegister8(regToName86[reg86], memVal86);
+                instructionLength = 2 + ea86.displacementSize;
             }
             break;
         case 0x21: // AND r/m16, r16
@@ -495,7 +934,7 @@ CPU8086.prototype.step = function() {
                 instructionLength = 2 + ea.displacementSize;
             }
             break;
-        case 0x23: // AND r/m16, r16
+        case 0x23: // AND r16, r/m16
             const modrm23 = this.readMemory8(currentAddress + 1);
             const reg23 = (modrm23 >> 3) & 0x7;
             const mod23 = (modrm23 >> 6) & 0x3;
@@ -504,17 +943,17 @@ CPU8086.prototype.step = function() {
             // 寄存器映射
             const regToName23 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
             
-            // 读取源寄存器值
-            const srcValue23 = this.getRegister(regToName23[reg23]);
+            // 读取目标寄存器值 (reg field = destination for 0x23)
+            const dstValue23 = this.getRegister(regToName23[reg23]);
             
-            // 读取目标操作数值（支持所有寻址模式）
-            const dstValue23 = this.readRM16(mod23, rm23, currentAddress);
+            // 读取源操作数值（r/m字段 = source）
+            const srcValue23 = this.readRM16(mod23, rm23, currentAddress);
             
             // 执行 AND 操作
             const result23 = dstValue23 & srcValue23;
             
-            // 写回结果（支持所有寻址模式）
-            this.writeRM16(mod23, rm23, currentAddress, result23);
+            // 写回结果到寄存器
+            this.setRegister(regToName23[reg23], result23);
             
             // 更新标志位
             this.updateFlags16(result23, dstValue23, srcValue23);
@@ -1147,7 +1586,10 @@ CPU8086.prototype.step = function() {
         case 0xcd: // INT imm8
             const interruptNum = this.readMemory8(currentAddress + 1);
             // 调用对应的中断处理程序
-            this.handleInterrupt(interruptNum);
+            if (!this.handleInterrupt(interruptNum)) {
+                // 中断处理需要阻塞（如等待键盘输入），不推进IP
+                return false;
+            }
             instructionLength = 2;
             break;
         case 0x40: // INC AX
@@ -1158,11 +1600,23 @@ CPU8086.prototype.step = function() {
         case 0x45: // INC BP
         case 0x46: // INC SI
         case 0x47: // INC DI
+        {
             const regInc = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'][opcode - 0x40];
             const valueInc = this.registers[regInc];
-            this.setRegister(regInc, (valueInc + 1));
+            const resultInc = (valueInc + 1) & 0xFFFF;
+            this.setRegister(regInc, resultInc);
+            // INC updates OF, SF, ZF, AF, PF (preserves CF)
+            this.flags.zf = (resultInc === 0) ? 1 : 0;
+            this.flags.sf = (resultInc & 0x8000) ? 1 : 0;
+            this.flags.of = (valueInc === 0x7FFF) ? 1 : 0;
+            this.flags.af = ((valueInc & 0x0F) === 0x0F) ? 1 : 0;
+            let parityInc = 0;
+            let vpInc = resultInc & 0xff;
+            for (let i = 0; i < 8; i++) { parityInc += vpInc & 1; vpInc >>= 1; }
+            this.flags.pf = (parityInc % 2 === 0) ? 1 : 0;
             instructionLength = 1;
             break;
+        }
         case 0x48: // DEC AX
         case 0x49: // DEC CX
         case 0x4a: // DEC DX
@@ -1171,31 +1625,23 @@ CPU8086.prototype.step = function() {
         case 0x4d: // DEC BP
         case 0x4e: // DEC SI
         case 0x4f: // DEC DI
+        {
             const regDec = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'][opcode - 0x48];
             const valueDec = this.registers[regDec];
-            const newValueDec = (valueDec - 1);
-            this.setRegister(regDec, newValueDec);
-            // 设置标志位
-            this.flags.zf = (newValueDec === 0) ? 1 : 0;
-            this.flags.sf = (newValueDec & 0x8000) ? 1 : 0;
-            // 计算奇偶标志（基于低8位）
+            const resultDec = (valueDec - 1) & 0xFFFF;
+            this.setRegister(regDec, resultDec);
+            // DEC updates OF, SF, ZF, AF, PF (preserves CF)
+            this.flags.zf = (resultDec === 0) ? 1 : 0;
+            this.flags.sf = (resultDec & 0x8000) ? 1 : 0;
+            this.flags.of = (valueDec === 0x8000) ? 1 : 0;
+            this.flags.af = ((valueDec & 0x0F) === 0x00) ? 1 : 0;
             let parityDec = 0;
-            let valueParityDec = newValueDec & 0xff;
-            for (let i = 0; i < 8; i++) {
-                parityDec += valueParityDec & 1;
-                valueParityDec >>= 1;
-            }
+            let vpDec = resultDec & 0xff;
+            for (let i = 0; i < 8; i++) { parityDec += vpDec & 1; vpDec >>= 1; }
             this.flags.pf = (parityDec % 2 === 0) ? 1 : 0;
             instructionLength = 1;
             break;
-        case 0xf8: // CLC
-            this.flags.cf = 0;
-            instructionLength = 1;
-            break;
-        case 0xf9: // STC
-            this.flags.cf = 1;
-            instructionLength = 1;
-            break;
+        }
         case 0xfc: // CLD
             this.flags.df = 0;
             instructionLength = 1;
@@ -1579,75 +2025,84 @@ CPU8086.prototype.step = function() {
                 instructionLength = 2 + ea.displacementSize;
             }
             break;
-        case 0x80: // ADD/OR/ADC/SBB/AND/SUB/CMP/XOR r/m8, imm8
+        case 0x80: // ADD/OR/ADC/SBB/AND/SUB/XOR/CMP r/m8, imm8
+        {
             const modrm80 = this.readMemory8(currentAddress + 1);
-            const reg80 = (modrm80 >> 3) & 0x7; // 0=ADD, 1=OR, 2=ADC, 3=SBB, 4=AND, 5=SUB, 7=CMP
+            const reg80 = (modrm80 >> 3) & 0x7;
             const mod80 = (modrm80 >> 6) & 0x3;
             const rm80 = modrm80 & 0x7;
             const imm80 = this.readMemory8(currentAddress + 2);
 
-            // 8位寄存器映射
             const rmToName80 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
             const isHighByte80 = [false, false, false, false, true, true, true, true];
 
-            // 读取操作数值（支持所有寻址模式）
             let oldByteValue;
             let oldValue;
             let destReg;
             
             if (mod80 === 3) {
-                // 寄存器模式
                 destReg = rmToName80[rm80];
                 oldValue = this.getRegister(destReg);
                 oldByteValue = isHighByte80[rm80] ? (oldValue >> 8) & 0xff : oldValue & 0xff;
             } else {
-                // 内存模式
                 oldByteValue = this.readRM8(mod80, rm80, currentAddress);
             }
             
             let result;
+            let isCmp80 = false;
 
-            if (reg80 === 0) {
-                // ADD r/m8, imm8
-                result = oldByteValue + imm80;
-                this.updateFlags8(result, oldByteValue, imm80, 'add');
-            } else if (reg80 === 4) {
-                // AND r/m8, imm8
-                result = oldByteValue & imm80;
-                this.updateFlags8(result, oldByteValue, imm80, 'and');
-            } else if (reg80 === 7) {
-                // CMP r/m8, imm8
-                result = oldByteValue - imm80;
-                this.updateFlags8(result, oldByteValue, imm80, 'sub');
-                // CMP 不修改目标寄存器
-                if (mod80 === 3) {
-                    instructionLength = 3;
-                } else {
-                    const ea = this.calculateEffectiveAddress(mod80, rm80, currentAddress);
-                    instructionLength = 3 + ea.displacementSize;
-                }
-                break;
-            } else {
-                console.error(`执行错误: 不支持的8位立即数操作 reg=${reg80}`);
-                this.running = false;
-                return false;
+            switch (reg80) {
+                case 0: // ADD
+                    result = oldByteValue + imm80;
+                    this.updateFlags8(result, oldByteValue, imm80, 'add');
+                    break;
+                case 1: // OR
+                    result = oldByteValue | imm80;
+                    this.updateFlags8(result, oldByteValue, imm80, 'and');
+                    this.flags.cf = 0; this.flags.of = 0;
+                    break;
+                case 2: // ADC
+                    result = oldByteValue + imm80 + this.flags.cf;
+                    this.updateFlags8(result, oldByteValue, imm80 + this.flags.cf, 'add');
+                    break;
+                case 3: // SBB
+                    result = oldByteValue - imm80 - this.flags.cf;
+                    this.updateFlags8(result, oldByteValue, imm80 + this.flags.cf, 'sub');
+                    break;
+                case 4: // AND
+                    result = oldByteValue & imm80;
+                    this.updateFlags8(result, oldByteValue, imm80, 'and');
+                    this.flags.cf = 0; this.flags.of = 0;
+                    break;
+                case 5: // SUB
+                    result = oldByteValue - imm80;
+                    this.updateFlags8(result, oldByteValue, imm80, 'sub');
+                    break;
+                case 6: // XOR
+                    result = oldByteValue ^ imm80;
+                    this.updateFlags8(result, oldByteValue, imm80, 'and');
+                    this.flags.cf = 0; this.flags.of = 0;
+                    break;
+                case 7: // CMP
+                    result = oldByteValue - imm80;
+                    this.updateFlags8(result, oldByteValue, imm80, 'sub');
+                    isCmp80 = true;
+                    break;
             }
 
-            // 写回结果（支持所有寻址模式）
-            const newByteValue = result & 0xff;
-            if (mod80 === 3) {
-                // 寄存器模式
-                if (isHighByte80[rm80]) {
-                    this.setRegister(destReg, (oldValue & 0x00ff) | (newByteValue << 8));
+            if (!isCmp80) {
+                const newByteValue = result & 0xff;
+                if (mod80 === 3) {
+                    if (isHighByte80[rm80]) {
+                        this.setRegister(destReg, (oldValue & 0x00ff) | (newByteValue << 8));
+                    } else {
+                        this.setRegister(destReg, (oldValue & 0xff00) | newByteValue);
+                    }
                 } else {
-                    this.setRegister(destReg, (oldValue & 0xff00) | newByteValue);
+                    this.writeRM8(mod80, rm80, currentAddress, newByteValue);
                 }
-            } else {
-                // 内存模式
-                this.writeRM8(mod80, rm80, currentAddress, newByteValue);
             }
             
-            // 计算指令长度
             if (mod80 === 3) {
                 instructionLength = 3;
             } else {
@@ -1655,67 +2110,77 @@ CPU8086.prototype.step = function() {
                 instructionLength = 3 + ea.displacementSize;
             }
             break;
-        case 0x81: // ADD/OR/ADC/SBB/AND/SUB/CMP/XOR r/m16, imm16
+        }
+        case 0x81: // ADD/OR/ADC/SBB/AND/SUB/XOR/CMP r/m16, imm16
+        {
             const modrm81 = this.readMemory8(currentAddress + 1);
-            const reg81 = (modrm81 >> 3) & 0x7; // 0=ADD, 1=OR, 2=ADC, 3=SBB, 4=AND, 5=SUB, 7=CMP
+            const reg81 = (modrm81 >> 3) & 0x7;
             const mod81 = (modrm81 >> 6) & 0x3;
             const rm81 = modrm81 & 0x7;
             const imm1681 = this.readMemory16(currentAddress + 2);
 
-            // 16位寄存器映射
             const rmToName81 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
 
-            // 读取操作数值（支持所有寻址模式）
             let oldValue81;
             let destReg81;
             
             if (mod81 === 3) {
-                // 寄存器模式
                 destReg81 = rmToName81[rm81];
                 oldValue81 = this.getRegister(destReg81);
             } else {
-                // 内存模式
                 oldValue81 = this.readRM16(mod81, rm81, currentAddress);
             }
             
             let result81;
+            let isCmp81 = false;
 
-            if (reg81 === 0) {
-                // ADD r/m16, imm16
-                result81 = oldValue81 + imm1681;
-                this.updateFlags16(result81, oldValue81, imm1681, 'add');
-            } else if (reg81 === 4) {
-                // AND r/m16, imm16
-                result81 = oldValue81 & imm1681;
-                this.updateFlags16(result81, oldValue81, imm1681, 'and');
-            } else if (reg81 === 7) {
-                // CMP r/m16, imm16
-                result81 = oldValue81 - imm1681;
-                this.updateFlags16(result81, oldValue81, imm1681, 'sub');
-                // CMP 不修改目标寄存器
-                if (mod81 === 3) {
-                    instructionLength = 4;
-                } else {
-                    const ea = this.calculateEffectiveAddress(mod81, rm81, currentAddress);
-                    instructionLength = 4 + ea.displacementSize;
-                }
-                break;
-            } else {
-                console.error(`执行错误: 不支持的16位立即数操作 reg=${reg81}`);
-                this.running = false;
-                return false;
+            switch (reg81) {
+                case 0: // ADD
+                    result81 = oldValue81 + imm1681;
+                    this.updateFlags16(result81, oldValue81, imm1681, 'add');
+                    break;
+                case 1: // OR
+                    result81 = oldValue81 | imm1681;
+                    this.updateFlags16(result81, oldValue81, imm1681, 'and');
+                    this.flags.cf = 0; this.flags.of = 0;
+                    break;
+                case 2: // ADC
+                    result81 = oldValue81 + imm1681 + this.flags.cf;
+                    this.updateFlags16(result81, oldValue81, imm1681 + this.flags.cf, 'add');
+                    break;
+                case 3: // SBB
+                    result81 = oldValue81 - imm1681 - this.flags.cf;
+                    this.updateFlags16(result81, oldValue81, imm1681 + this.flags.cf, 'sub');
+                    break;
+                case 4: // AND
+                    result81 = oldValue81 & imm1681;
+                    this.updateFlags16(result81, oldValue81, imm1681, 'and');
+                    this.flags.cf = 0; this.flags.of = 0;
+                    break;
+                case 5: // SUB
+                    result81 = oldValue81 - imm1681;
+                    this.updateFlags16(result81, oldValue81, imm1681, 'sub');
+                    break;
+                case 6: // XOR
+                    result81 = oldValue81 ^ imm1681;
+                    this.updateFlags16(result81, oldValue81, imm1681, 'and');
+                    this.flags.cf = 0; this.flags.of = 0;
+                    break;
+                case 7: // CMP
+                    result81 = oldValue81 - imm1681;
+                    this.updateFlags16(result81, oldValue81, imm1681, 'sub');
+                    isCmp81 = true;
+                    break;
             }
 
-            // 写回结果（支持所有寻址模式）
-            if (mod81 === 3) {
-                // 寄存器模式
-                this.setRegister(destReg81, result81);
-            } else {
-                // 内存模式
-                this.writeRM16(mod81, rm81, currentAddress, result81);
+            if (!isCmp81) {
+                if (mod81 === 3) {
+                    this.setRegister(destReg81, result81 & 0xFFFF);
+                } else {
+                    this.writeRM16(mod81, rm81, currentAddress, result81 & 0xFFFF);
+                }
             }
             
-            // 计算指令长度
             if (mod81 === 3) {
                 instructionLength = 4;
             } else {
@@ -1723,6 +2188,7 @@ CPU8086.prototype.step = function() {
                 instructionLength = 4 + ea.displacementSize;
             }
             break;
+        }
         case 0xf6: { // Group 3 r/m8
             const modrm = this.readMemory8(currentAddress + 1);
             const reg = (modrm >> 3) & 0x7;
@@ -2097,12 +2563,7 @@ CPU8086.prototype.step = function() {
             // 读取下一个字节以确定是哪种串操作
             const nextByte = this.readMemory8(currentAddress + 1);
             if (nextByte === 0xa4) { // REP MOVSB
-                const cx = this.getRegister('cx');
-                if (cx === 0) {
-                    // CX=0，跳过REP MOVSB
-                    instructionLength = 2;
-                } else {
-                    // 执行一次MOVSB
+                while (this.getRegister('cx') > 0) {
                     const ds = this.getSegmentRegister('ds');
                     const es = this.getSegmentRegister('es');
                     const si = this.getRegister('si');
@@ -2112,22 +2573,13 @@ CPU8086.prototype.step = function() {
                     const value = this.readMemory8(src);
                     this.writeMemory8(dst, value);
                     const delta = this.flags.df ? -1 : 1;
-                    this.setRegister('si', (si + delta));
-                    this.setRegister('di', (di + delta));
-                    // CX减1
-                    this.setRegister('cx', (cx - 1));
-                    // 如果CX不为0，重复执行REP MOVSB
-                    if (this.getRegister('cx') !== 0) {
-                        instructionLength = 0; // 不增加IP，重复执行
-                    } else {
-                        instructionLength = 2; // 执行完毕，跳过REP MOVSB
-                    }
+                    this.setRegister('si', (si + delta) & 0xFFFF);
+                    this.setRegister('di', (di + delta) & 0xFFFF);
+                    this.setRegister('cx', (this.getRegister('cx') - 1) & 0xFFFF);
                 }
+                instructionLength = 2;
             } else if (nextByte === 0xa5) { // REP MOVSW
-                const cx = this.getRegister('cx');
-                if (cx === 0) {
-                    instructionLength = 2;
-                } else {
+                while (this.getRegister('cx') > 0) {
                     const ds = this.getSegmentRegister('ds');
                     const es = this.getSegmentRegister('es');
                     const si = this.getRegister('si');
@@ -2137,15 +2589,124 @@ CPU8086.prototype.step = function() {
                     const value = this.readMemory16(src);
                     this.writeMemory16(dst, value);
                     const delta = this.flags.df ? -2 : 2;
-                    this.setRegister('si', (si + delta));
-                    this.setRegister('di', (di + delta));
-                    this.setRegister('cx', (cx - 1));
-                    if (this.getRegister('cx') !== 0) {
-                        instructionLength = 0;
-                    } else {
-                        instructionLength = 2;
-                    }
+                    this.setRegister('si', (si + delta) & 0xFFFF);
+                    this.setRegister('di', (di + delta) & 0xFFFF);
+                    this.setRegister('cx', (this.getRegister('cx') - 1) & 0xFFFF);
                 }
+                instructionLength = 2;
+            } else if (nextByte === 0xaa) { // REP STOSB
+                while (this.getRegister('cx') > 0) {
+                    const es = this.getSegmentRegister('es');
+                    const di = this.getRegister('di');
+                    const dst = this.getMemoryAddress(es, di);
+                    const al = this.getRegister('ax') & 0xFF;
+                    this.writeMemory8(dst, al);
+                    const delta = this.flags.df ? -1 : 1;
+                    this.setRegister('di', (di + delta) & 0xFFFF);
+                    this.setRegister('cx', (this.getRegister('cx') - 1) & 0xFFFF);
+                }
+                instructionLength = 2;
+            } else if (nextByte === 0xab) { // REP STOSW
+                while (this.getRegister('cx') > 0) {
+                    const es = this.getSegmentRegister('es');
+                    const di = this.getRegister('di');
+                    const dst = this.getMemoryAddress(es, di);
+                    const ax = this.getRegister('ax');
+                    this.writeMemory16(dst, ax);
+                    const delta = this.flags.df ? -2 : 2;
+                    this.setRegister('di', (di + delta) & 0xFFFF);
+                    this.setRegister('cx', (this.getRegister('cx') - 1) & 0xFFFF);
+                }
+                instructionLength = 2;
+            } else if (nextByte === 0xac) { // REP LODSB
+                while (this.getRegister('cx') > 0) {
+                    const ds = this.getSegmentRegister('ds');
+                    const si = this.getRegister('si');
+                    const src = this.getMemoryAddress(ds, si);
+                    const val = this.readMemory8(src);
+                    this.setRegister('ax', (this.getRegister('ax') & 0xFF00) | val);
+                    const delta = this.flags.df ? -1 : 1;
+                    this.setRegister('si', (si + delta) & 0xFFFF);
+                    this.setRegister('cx', (this.getRegister('cx') - 1) & 0xFFFF);
+                }
+                instructionLength = 2;
+            } else if (nextByte === 0xad) { // REP LODSW
+                while (this.getRegister('cx') > 0) {
+                    const ds = this.getSegmentRegister('ds');
+                    const si = this.getRegister('si');
+                    const src = this.getMemoryAddress(ds, si);
+                    const val = this.readMemory16(src);
+                    this.setRegister('ax', val);
+                    const delta = this.flags.df ? -2 : 2;
+                    this.setRegister('si', (si + delta) & 0xFFFF);
+                    this.setRegister('cx', (this.getRegister('cx') - 1) & 0xFFFF);
+                }
+                instructionLength = 2;
+            } else if (nextByte === 0xae) { // REPE/REPZ SCASB
+                while (this.getRegister('cx') > 0) {
+                    const es = this.getSegmentRegister('es');
+                    const di = this.getRegister('di');
+                    const diAddr = this.getMemoryAddress(es, di);
+                    const memVal = this.readMemory8(diAddr);
+                    const al = this.getRegister('ax') & 0xFF;
+                    const res = al - memVal;
+                    this.updateFlags8(res, al, memVal, 'sub');
+                    const delta = this.flags.df ? -1 : 1;
+                    this.setRegister('di', (di + delta) & 0xFFFF);
+                    this.setRegister('cx', (this.getRegister('cx') - 1) & 0xFFFF);
+                    // REPE: stop when not equal (ZF=0)
+                    if (!this.flags.zf) break;
+                }
+                instructionLength = 2;
+            } else if (nextByte === 0xaf) { // REPE/REPZ SCASW
+                while (this.getRegister('cx') > 0) {
+                    const es = this.getSegmentRegister('es');
+                    const di = this.getRegister('di');
+                    const diAddr = this.getMemoryAddress(es, di);
+                    const memVal = this.readMemory16(diAddr);
+                    const ax = this.getRegister('ax');
+                    const res = ax - memVal;
+                    this.updateFlags16(res, ax, memVal, 'sub');
+                    const delta = this.flags.df ? -2 : 2;
+                    this.setRegister('di', (di + delta) & 0xFFFF);
+                    this.setRegister('cx', (this.getRegister('cx') - 1) & 0xFFFF);
+                    if (!this.flags.zf) break;
+                }
+                instructionLength = 2;
+            } else if (nextByte === 0xa6) { // REPE/REPZ CMPSB
+                while (this.getRegister('cx') > 0) {
+                    const ds = this.getSegmentRegister('ds');
+                    const es = this.getSegmentRegister('es');
+                    const si = this.getRegister('si');
+                    const di = this.getRegister('di');
+                    const srcVal = this.readMemory8(this.getMemoryAddress(ds, si));
+                    const dstVal = this.readMemory8(this.getMemoryAddress(es, di));
+                    const res = srcVal - dstVal;
+                    this.updateFlags8(res, srcVal, dstVal, 'sub');
+                    const inc = this.flags.df ? -1 : 1;
+                    this.setRegister('si', (si + inc) & 0xFFFF);
+                    this.setRegister('di', (di + inc) & 0xFFFF);
+                    this.setRegister('cx', (this.getRegister('cx') - 1) & 0xFFFF);
+                    if (!this.flags.zf) break;
+                }
+                instructionLength = 2;
+            } else if (nextByte === 0xa7) { // REPE/REPZ CMPSW
+                while (this.getRegister('cx') > 0) {
+                    const ds = this.getSegmentRegister('ds');
+                    const es = this.getSegmentRegister('es');
+                    const si = this.getRegister('si');
+                    const di = this.getRegister('di');
+                    const srcVal = this.readMemory16(this.getMemoryAddress(ds, si));
+                    const dstVal = this.readMemory16(this.getMemoryAddress(es, di));
+                    const res = srcVal - dstVal;
+                    this.updateFlags16(res, srcVal, dstVal, 'sub');
+                    const inc = this.flags.df ? -2 : 2;
+                    this.setRegister('si', (si + inc) & 0xFFFF);
+                    this.setRegister('di', (di + inc) & 0xFFFF);
+                    this.setRegister('cx', (this.getRegister('cx') - 1) & 0xFFFF);
+                    if (!this.flags.zf) break;
+                }
+                instructionLength = 2;
             } else {
                 console.error(`执行错误: 不支持的REP操作 0x${nextByte.toString(16)}`);
                 this.running = false;
@@ -2450,8 +3011,8 @@ CPU8086.prototype.step = function() {
             const resultcmp = alcmp - imm8cmp;
             // 设置标志位，但不修改寄存器
             this.flags.cf = (resultcmp < 0) ? 1 : 0;
-            this.flags.zf = (resultcmp === 0) ? 1 : 0;
-            this.flags.sf = (resultcmp < 0) ? 1 : 0;
+            this.flags.zf = ((resultcmp & 0xff) === 0) ? 1 : 0;
+            this.flags.sf = (resultcmp & 0x80) ? 1 : 0;
             // 计算奇偶标志
             let paritycmp = 0;
             let valuecmp = resultcmp & 0xff;
@@ -2476,8 +3037,8 @@ CPU8086.prototype.step = function() {
             const result16cmp = axcmp - imm16cmp;
             // 设置标志位，但不修改寄存器
             this.flags.cf = (result16cmp < 0) ? 1 : 0;
-            this.flags.zf = (result16cmp === 0) ? 1 : 0;
-            this.flags.sf = (result16cmp < 0) ? 1 : 0;
+            this.flags.zf = ((result16cmp & 0xffff) === 0) ? 1 : 0;
+            this.flags.sf = (result16cmp & 0x8000) ? 1 : 0;
             // 计算奇偶标志（基于低8位）
             let parity16cmp = 0;
             let value16cmp = result16cmp & 0xff;
@@ -2500,50 +3061,40 @@ CPU8086.prototype.step = function() {
             const reg39 = (modrm39 >> 3) & 0x7;
             const mod39 = (modrm39 >> 6) & 0x3;
             const rm39 = modrm39 & 0x7;
-
-            // 寄存器映射
             const regToName39 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-            const rmToName39 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-
+            const srcValue39 = this.getRegister(regToName39[reg39]);
+            const dstValue39 = this.readRM16(mod39, rm39, currentAddress);
+            const result39 = dstValue39 - srcValue39;
+            this.updateFlags16(result39, dstValue39, srcValue39, 'sub');
             if (mod39 === 3) {
-                // 寄存器到寄存器 CMP
-                const srcValue = this.getRegister(regToName39[reg39]);
-                const dstValue = this.getRegister(rmToName39[rm39]);
-                const result39 = dstValue - srcValue;
-                // 设置标志位，但不修改寄存器
-                this.updateFlags16(result39, dstValue, srcValue, 'sub');
                 instructionLength = 2;
             } else {
-                console.error(`执行错误: 不支持的寻址模式 mod=${mod39}`);
-                this.running = false;
-                return false;
+                const ea39 = this.calculateEffectiveAddress(mod39, rm39, currentAddress);
+                instructionLength = 2 + ea39.displacementSize;
             }
             break;
         }
-        case 0x3a: // CMP r8, r/m8
+        case 0x3a: { // CMP r8, r/m8
             const modrm3a = this.readMemory8(currentAddress + 1);
             const reg3a = (modrm3a >> 3) & 0x7;
             const mod3a = (modrm3a >> 6) & 0x3;
             const rm3a = modrm3a & 0x7;
-
-            // 8位寄存器映射
             const regToName3a = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
-            const rmToName3a = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'];
-
+            const dstValue3a = this.getRegister8(regToName3a[reg3a]);
+            let srcValue3a;
             if (mod3a === 3) {
-                // 寄存器到寄存器 CMP (8位)
-                const srcValue3a = this.getRegister8(rmToName3a[rm3a]);
-                const dstValue3a = this.getRegister8(regToName3a[reg3a]);
-                const result3a = dstValue3a - srcValue3a;
-                // 设置标志位，但不修改寄存器
-                this.updateFlags8(result3a, dstValue3a, srcValue3a, 'sub');
+                srcValue3a = this.getRegister8(regToName3a[rm3a]);
                 instructionLength = 2;
             } else {
-                console.error(`执行错误: CMP 8位不支持的寻址模式 mod=${mod3a}`);
-                this.running = false;
-                return false;
+                const ea3a = this.calculateEffectiveAddress(mod3a, rm3a, currentAddress);
+                const addr3a = this.getMemoryAddress(this.getSegmentRegister('ds'), ea3a.address);
+                srcValue3a = this.readMemory8(addr3a);
+                instructionLength = 2 + ea3a.displacementSize;
             }
+            const result3a = dstValue3a - srcValue3a;
+            this.updateFlags8(result3a, dstValue3a, srcValue3a, 'sub');
             break;
+        }
         case 0xe0: // LOOPNZ/LOOPNE short
             {
                 const off = this.readMemory8(currentAddress + 1);
@@ -2670,83 +3221,6 @@ CPU8086.prototype.step = function() {
                 instructionLength = 2;
             }
             break;
-        case 0x81: // Group - ADD/OR/ADC/SBB/AND/SUB/XOR/CMP Ev, Iv (已在前面实现)
-            // 此case已在前面实现，这里不再重复
-            console.error(`执行错误: 重复的case 0x81`);
-            this.running = false;
-            return false;
-            break;
-            
-            // 目标寄存器映射 (r/m字段，当mod=11时)
-            const rmToName = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-
-            if (mod81 === 3) {
-                // 寄存器操作
-                const destReg = rmToName[rm81];
-                const oldValue = this.getRegister(destReg);
-                let result;
-
-                switch (reg81) {
-                    case 0: // ADD
-                        result = oldValue + imm16_81;
-                        break;
-                    case 1: // OR
-                        result = oldValue | imm16_81;
-                        break;
-                    case 2: // ADC
-                        result = oldValue + imm16_81 + this.flags.cf;
-                        break;
-                    case 3: // SBB
-                        result = oldValue - imm16_81 - this.flags.cf;
-                        break;
-                    case 4: // AND
-                        result = oldValue & imm16_81;
-                        break;
-                    case 5: // SUB
-                        result = oldValue - imm16_81;
-                        break;
-                    case 6: // XOR
-                        result = oldValue ^ imm16_81;
-                        break;
-                    case 7: // CMP
-                        result = oldValue - imm16_81;
-                        break;
-                    default:
-                        console.error(`执行错误: 不支持的扩展操作码 ${reg81}`);
-                        this.running = false;
-                        return false;
-                }
-
-                // 设置标志位（CMP不设置目标寄存器）
-                if (reg81 !== 7) {
-                    this.setRegister(destReg, result);
-                }
-                // 根据操作类型设置标志位
-                let operation = 'add';
-                switch (reg81) {
-                    case 0: // ADD
-                    case 2: // ADC
-                        operation = 'add';
-                        break;
-                    case 3: // SBB
-                    case 5: // SUB
-                    case 7: // CMP
-                        operation = 'sub';
-                        break;
-                    case 1: // OR
-                    case 4: // AND
-                    case 6: // XOR
-                        operation = reg81 === 1 ? 'or' : (reg81 === 4 ? 'and' : 'xor');
-                        break;
-                }
-                this.updateFlags16(result, oldValue, imm16_81, operation);
-                instructionLength = 4;
-            } else {
-                console.error(`执行错误: 不支持的寻址模式 mod=${mod81}`);
-                this.running = false;
-                return false;
-            }
-            break;
         case 0x8c: // MOV r/m16, Sreg (从段寄存器到通用寄存器/内存)
             const modrm8c = this.readMemory8(currentAddress + 1);
             const reg8c = (modrm8c >> 3) & 0x7; // 段寄存器：0=ES, 1=CS, 2=SS, 3=DS
@@ -2759,41 +3233,31 @@ CPU8086.prototype.step = function() {
             const segmentValue = this.getSegmentRegister(srcSegment);
 
             if (mod8c === 3) {
-                // 寄存器到寄存器传送
                 const dstReg = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'][rm8c];
                 this.setRegister(dstReg, segmentValue);
                 instructionLength = 2;
             } else {
-                console.error(`执行错误: MOV Sreg 不支持的内存寻址模式`);
-                this.running = false;
-                return false;
+                const ea8c = this.calculateEffectiveAddress(mod8c, rm8c, currentAddress);
+                const addr8c = this.getMemoryAddress(this.getSegmentRegister('ds'), ea8c.address);
+                this.writeMemory16(addr8c, segmentValue);
+                instructionLength = 2 + ea8c.displacementSize;
             }
             break;
         case 0x8d: { // LEA r16, m
             const modrm8d = this.readMemory8(currentAddress + 1);
-            const reg8d = (modrm8d >> 3) & 0x7; // 目标寄存器
+            const reg8d = (modrm8d >> 3) & 0x7;
             const mod8d = (modrm8d >> 6) & 0x3;
             const rm8d = modrm8d & 0x7;
-
-            // 寄存器映射
             const regToName8d = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
-            const dstReg = regToName8d[reg8d];
-
-            if (mod8d === 0 && rm8d === 6) {
-                // 直接寻址模式：LEA r16, [disp16]
-                const offset16 = this.readMemory16(currentAddress + 2);
-                this.setRegister(dstReg, offset16);
-                instructionLength = 4;
-            } else if (mod8d === 3) {
-                // 寄存器到寄存器（无意义，但为了完整性实现）
-                const srcReg = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'][rm8d];
-                const srcValue = this.getRegister(srcReg);
-                this.setRegister(dstReg, srcValue);
+            const dstReg8d = regToName8d[reg8d];
+            if (mod8d === 3) {
+                // LEA with register operand — just copy (uncommon but valid on some assemblers)
+                this.setRegister(dstReg8d, this.getRegister(regToName8d[rm8d]));
                 instructionLength = 2;
             } else {
-                console.error(`执行错误: LEA 不支持的寻址模式`);
-                this.running = false;
-                return false;
+                const ea8d = this.calculateEffectiveAddress(mod8d, rm8d, currentAddress);
+                this.setRegister(dstReg8d, ea8d.address & 0xFFFF);
+                instructionLength = 2 + ea8d.displacementSize;
             }
             break;
         }
@@ -2808,15 +3272,16 @@ CPU8086.prototype.step = function() {
             const dstSegment = sregToName8e[reg8e];
 
             if (mod8e === 3) {
-                // 寄存器到寄存器传送
                 const srcReg = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'][rm8e];
                 const srcValue = this.getRegister(srcReg);
                 this.setSegmentRegister(dstSegment, srcValue);
                 instructionLength = 2;
             } else {
-                console.error(`执行错误: MOV Sreg 不支持的内存寻址模式`);
-                this.running = false;
-                return false;
+                const ea8e = this.calculateEffectiveAddress(mod8e, rm8e, currentAddress);
+                const addr8e = this.getMemoryAddress(this.getSegmentRegister('ds'), ea8e.address);
+                const srcValue = this.readMemory16(addr8e);
+                this.setSegmentRegister(dstSegment, srcValue);
+                instructionLength = 2 + ea8e.displacementSize;
             }
             break;
         }
@@ -3208,6 +3673,294 @@ CPU8086.prototype.step = function() {
             this.running = false;
             return false;
 
+        // === 新增缺失指令 ===
+
+        case 0x98: // CBW - Sign-extend AL into AX
+        {
+            const al = this.getRegister('ax') & 0xFF;
+            if (al & 0x80) {
+                this.setRegister('ax', 0xFF00 | al);
+            } else {
+                this.setRegister('ax', al);
+            }
+            instructionLength = 1;
+            break;
+        }
+        case 0x99: // CWD - Sign-extend AX into DX:AX
+        {
+            const ax = this.getRegister('ax');
+            if (ax & 0x8000) {
+                this.setRegister('dx', 0xFFFF);
+            } else {
+                this.setRegister('dx', 0);
+            }
+            instructionLength = 1;
+            break;
+        }
+        case 0x9e: // SAHF - Store AH into flags (SF ZF x AF x PF x CF)
+        {
+            const ah = (this.getRegister('ax') >> 8) & 0xFF;
+            this.flags.sf = (ah >> 7) & 1;
+            this.flags.zf = (ah >> 6) & 1;
+            this.flags.af = (ah >> 4) & 1;
+            this.flags.pf = (ah >> 2) & 1;
+            this.flags.cf = ah & 1;
+            instructionLength = 1;
+            break;
+        }
+        case 0x9f: // LAHF - Load AH from flags
+        {
+            let ah = 0;
+            ah |= (this.flags.sf << 7);
+            ah |= (this.flags.zf << 6);
+            ah |= (this.flags.af << 4);
+            ah |= (this.flags.pf << 2);
+            ah |= (1 << 1); // bit 1 is always 1
+            ah |= this.flags.cf;
+            const axLahf = this.getRegister('ax');
+            this.setRegister('ax', (axLahf & 0x00FF) | (ah << 8));
+            instructionLength = 1;
+            break;
+        }
+        case 0x54: // PUSH SP
+        {
+            const spVal = this.getRegister('sp');
+            this.setRegister('sp', (spVal - 2) & 0xFFFF);
+            const ssAddr = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
+            this.writeMemory16(ssAddr, spVal);
+            instructionLength = 1;
+            break;
+        }
+        case 0x55: // PUSH BP
+        {
+            const spVal55 = this.getRegister('sp') - 2;
+            this.setRegister('sp', spVal55 & 0xFFFF);
+            const ssAddr55 = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
+            this.writeMemory16(ssAddr55, this.getRegister('bp'));
+            instructionLength = 1;
+            break;
+        }
+        case 0x5c: // POP SP
+        {
+            const ssAddrSp = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
+            this.setRegister('sp', this.readMemory16(ssAddrSp));
+            instructionLength = 1;
+            break;
+        }
+        case 0x5d: // POP BP
+        {
+            const ssAddrBp = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
+            this.setRegister('bp', this.readMemory16(ssAddrBp));
+            this.setRegister('sp', (this.getRegister('sp') + 2) & 0xFFFF);
+            instructionLength = 1;
+            break;
+        }
+        case 0x06: // PUSH ES
+        {
+            const spES = this.getRegister('sp') - 2;
+            this.setRegister('sp', spES & 0xFFFF);
+            const ssES = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
+            this.writeMemory16(ssES, this.getSegmentRegister('es'));
+            instructionLength = 1;
+            break;
+        }
+        case 0x07: // POP ES
+        {
+            const ssPopES = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
+            this.setSegmentRegister('es', this.readMemory16(ssPopES));
+            this.setRegister('sp', (this.getRegister('sp') + 2) & 0xFFFF);
+            instructionLength = 1;
+            break;
+        }
+        case 0x0e: // PUSH CS
+        {
+            const spCS = this.getRegister('sp') - 2;
+            this.setRegister('sp', spCS & 0xFFFF);
+            const ssCS = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
+            this.writeMemory16(ssCS, this.getSegmentRegister('cs'));
+            instructionLength = 1;
+            break;
+        }
+        case 0x17: // POP SS
+        {
+            const ssPopSS = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
+            this.setSegmentRegister('ss', this.readMemory16(ssPopSS));
+            this.setRegister('sp', (this.getRegister('sp') + 2) & 0xFFFF);
+            instructionLength = 1;
+            break;
+        }
+        case 0x1e: // PUSH DS
+        {
+            const spDS = this.getRegister('sp') - 2;
+            this.setRegister('sp', spDS & 0xFFFF);
+            const ssDS = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
+            this.writeMemory16(ssDS, this.getSegmentRegister('ds'));
+            instructionLength = 1;
+            break;
+        }
+        case 0x1f: // POP DS
+        {
+            const ssPopDS = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
+            this.setSegmentRegister('ds', this.readMemory16(ssPopDS));
+            this.setRegister('sp', (this.getRegister('sp') + 2) & 0xFFFF);
+            instructionLength = 1;
+            break;
+        }
+        case 0x83: // Group: ADD/OR/ADC/SBB/AND/SUB/XOR/CMP r/m16, imm8 (sign-extended)
+        {
+            const modrm83 = this.readMemory8(currentAddress + 1);
+            const reg83 = (modrm83 >> 3) & 0x7;
+            const mod83 = (modrm83 >> 6) & 0x3;
+            const rm83 = modrm83 & 0x7;
+            let imm83 = this.readMemory8(currentAddress + 2);
+            // Sign-extend imm8 to 16-bit
+            if (imm83 & 0x80) imm83 = imm83 | 0xFF00;
+            
+            const rmToName83 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'];
+
+            let oldValue83;
+            let destReg83;
+            
+            if (mod83 === 3) {
+                destReg83 = rmToName83[rm83];
+                oldValue83 = this.getRegister(destReg83);
+            } else {
+                oldValue83 = this.readRM16(mod83, rm83, currentAddress);
+            }
+            
+            let result83;
+            let isCmp83 = false;
+
+            switch (reg83) {
+                case 0: // ADD
+                    result83 = oldValue83 + imm83;
+                    this.updateFlags16(result83, oldValue83, imm83, 'add');
+                    break;
+                case 1: // OR
+                    result83 = oldValue83 | imm83;
+                    this.updateFlags16(result83, oldValue83, imm83, 'and');
+                    this.flags.cf = 0; this.flags.of = 0;
+                    break;
+                case 2: // ADC
+                    result83 = oldValue83 + imm83 + this.flags.cf;
+                    this.updateFlags16(result83, oldValue83, imm83 + this.flags.cf, 'add');
+                    break;
+                case 3: // SBB
+                    result83 = oldValue83 - imm83 - this.flags.cf;
+                    this.updateFlags16(result83, oldValue83, imm83 + this.flags.cf, 'sub');
+                    break;
+                case 4: // AND
+                    result83 = oldValue83 & imm83;
+                    this.updateFlags16(result83, oldValue83, imm83, 'and');
+                    this.flags.cf = 0; this.flags.of = 0;
+                    break;
+                case 5: // SUB
+                    result83 = oldValue83 - imm83;
+                    this.updateFlags16(result83, oldValue83, imm83, 'sub');
+                    break;
+                case 6: // XOR
+                    result83 = oldValue83 ^ imm83;
+                    this.updateFlags16(result83, oldValue83, imm83, 'and');
+                    this.flags.cf = 0; this.flags.of = 0;
+                    break;
+                case 7: // CMP
+                    result83 = oldValue83 - imm83;
+                    this.updateFlags16(result83, oldValue83, imm83, 'sub');
+                    isCmp83 = true;
+                    break;
+            }
+
+            if (!isCmp83) {
+                if (mod83 === 3) {
+                    this.setRegister(destReg83, result83 & 0xFFFF);
+                } else {
+                    this.writeRM16(mod83, rm83, currentAddress, result83 & 0xFFFF);
+                }
+            }
+            
+            if (mod83 === 3) {
+                instructionLength = 3;
+            } else {
+                const ea = this.calculateEffectiveAddress(mod83, rm83, currentAddress);
+                instructionLength = 3 + ea.displacementSize;
+            }
+            break;
+        }
+        case 0xF2: // REPNE/REPNZ prefix
+        {
+            const nextOp = this.readMemory8(currentAddress + 1);
+            const cx = this.getRegister('cx');
+            if (cx === 0) {
+                instructionLength = 2;
+                break;
+            }
+            switch (nextOp) {
+                case 0xAE: // REPNE SCASB
+                {
+                    let cxVal = cx;
+                    while (cxVal > 0) {
+                        const diAddr = this.getMemoryAddress(this.getSegmentRegister('es'), this.getRegister('di'));
+                        const memVal = this.readMemory8(diAddr);
+                        const al = this.getRegister('ax') & 0xFF;
+                        const res = al - memVal;
+                        this.updateFlags8(res, al, memVal, 'sub');
+                        this.setRegister('di', this.flags.df ? 
+                            (this.getRegister('di') - 1) & 0xFFFF : 
+                            (this.getRegister('di') + 1) & 0xFFFF);
+                        cxVal--;
+                        if (this.flags.zf) break; // Stop if equal
+                    }
+                    this.setRegister('cx', cxVal);
+                    instructionLength = 2;
+                    break;
+                }
+                case 0xAF: // REPNE SCASW
+                {
+                    let cxVal = cx;
+                    while (cxVal > 0) {
+                        const diAddr = this.getMemoryAddress(this.getSegmentRegister('es'), this.getRegister('di'));
+                        const memVal = this.readMemory16(diAddr);
+                        const ax = this.getRegister('ax');
+                        const res = ax - memVal;
+                        this.updateFlags16(res, ax, memVal, 'sub');
+                        this.setRegister('di', this.flags.df ? 
+                            (this.getRegister('di') - 2) & 0xFFFF : 
+                            (this.getRegister('di') + 2) & 0xFFFF);
+                        cxVal--;
+                        if (this.flags.zf) break;
+                    }
+                    this.setRegister('cx', cxVal);
+                    instructionLength = 2;
+                    break;
+                }
+                case 0xA6: // REPNE CMPSB
+                {
+                    let cxVal = cx;
+                    while (cxVal > 0) {
+                        const siAddr = this.getMemoryAddress(this.getSegmentRegister('ds'), this.getRegister('si'));
+                        const diAddr = this.getMemoryAddress(this.getSegmentRegister('es'), this.getRegister('di'));
+                        const srcVal = this.readMemory8(siAddr);
+                        const dstVal = this.readMemory8(diAddr);
+                        const res = srcVal - dstVal;
+                        this.updateFlags8(res, srcVal, dstVal, 'sub');
+                        const inc = this.flags.df ? -1 : 1;
+                        this.setRegister('si', (this.getRegister('si') + inc) & 0xFFFF);
+                        this.setRegister('di', (this.getRegister('di') + inc) & 0xFFFF);
+                        cxVal--;
+                        if (this.flags.zf) break;
+                    }
+                    this.setRegister('cx', cxVal);
+                    instructionLength = 2;
+                    break;
+                }
+                default:
+                    console.error(`执行错误: 不支持的REPNE指令 0x${nextOp.toString(16)}`);
+                    this.running = false;
+                    return false;
+            }
+            break;
+        }
+
         default:
             // 所有未实现的指令都报非法指令错误
             console.error(`执行错误: 遇到非法指令 0x${opcode.toString(16).padStart(2, '0')}`);
@@ -3236,8 +3989,9 @@ CPU8086.prototype.run = function() {
             break;
         }
 
-        // 执行前清除寄存器和内存操作，只保留最后一条指令的操作
+        // 执行前累积内存操作到高亮集合，然后清除
         if (instructionCount > 0) {
+            findSegmentOperationAddresses();
             this.clearRegisterOperations();
             this.clearMemoryOperations();
         }
@@ -3267,10 +4021,11 @@ CPU8086.prototype.getCurrentAddress = function() {
 
 CPU8086.prototype.handleInterrupt = function(interruptNum) {
     if (interruptNum === 0x21) {
-        this.handleInt21();
+        return this.handleInt21();
     } else if (interruptNum === 0x16) {
-        this.handleInt16();
+        return this.handleInt16();
     } else {
         console.warn(`未实现的中断: INT ${interruptNum.toString(16).padStart(2, '0')}`);
+        return true;
     }
 };

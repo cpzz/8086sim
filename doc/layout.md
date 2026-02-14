@@ -11,15 +11,15 @@
 ### 左侧区域（left-panel）：
 
 左侧面板（left-panel） - 左侧的大面板区域
-    左侧tabs（left-tabs） - 左侧面板顶部的标签按钮："屏幕"、"寄存器"、"内存"
+    左侧tabs（left-tabs） - 左侧面板顶部的标签按钮："寄存器"、"内存"、"屏幕"
     左侧tab内容（left-tab-content） - 每个tab对应的内容区域，有 overflow: auto，会显示内部滚动条
-    屏幕tab - 包含DOS 80x25显示网格
-    寄存器tab - 包含通用寄存器表格、指针/索引寄存器、标志位、段寄存器
+    寄存器tab（默认） - 包含通用寄存器表格、指针/索引寄存器、标志位、段寄存器
     内存tab - 包含内存面板
         内存面板（memory-panel） - 内存tab的内容
         内存段选择tabs（memory-segment-tabs） - "代码段(CS)"、"数据段(DS)"、"堆栈段(SS)"、"附加段(ES)"
         内存控制区（memory-controls） - 地址输入框和"前往"按钮
         内存网格（memory-grid） - 显示内存地址和字节的表格
+    屏幕tab - 包含DOS 80x25显示网格
 
 ### 右侧区域（right-panel）：
 

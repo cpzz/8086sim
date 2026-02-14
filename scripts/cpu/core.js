@@ -52,5 +52,8 @@ class CPU8086 {
         this.updateOutputDisplay = null;
 
         this.waitForKeyPress = null;
+
+        // 跟踪各段最后一次内存访问的物理地址
+        this.lastSegmentAccessAddress = { cs: -1, ds: -1, ss: -1, es: -1 };
     }
 }

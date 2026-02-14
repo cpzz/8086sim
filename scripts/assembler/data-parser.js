@@ -1,11 +1,13 @@
-Assembler.prototype.parseDB = function(dataPart) {
+Assembler.prototype.parseDB = function(dataPart, currentAddress) {
     const result = [];
     const dataWithoutComment = dataPart.split(';')[0].trim();
 
+    // Split by commas, respecting strings and parentheses
     const values = [];
     let currentValue = '';
     let inString = false;
     let stringDelimiter = '';
+    let parenDepth = 0;
 
     for (let i = 0; i < dataWithoutComment.length; i++) {
         const char = dataWithoutComment[i];
@@ -17,7 +19,13 @@ Assembler.prototype.parseDB = function(dataPart) {
         } else if (char === stringDelimiter && inString) {
             inString = false;
             currentValue += char;
-        } else if (char === ',' && !inString) {
+        } else if (char === '(' && !inString) {
+            parenDepth++;
+            currentValue += char;
+        } else if (char === ')' && !inString) {
+            parenDepth--;
+            currentValue += char;
+        } else if (char === ',' && !inString && parenDepth === 0) {
             values.push(currentValue.trim());
             currentValue = '';
         } else {
@@ -38,19 +46,15 @@ Assembler.prototype.parseDB = function(dataPart) {
 
                 const valueStart = value.indexOf('(') + 1;
                 const valueEnd = value.lastIndexOf(')');
-                const dupValue = value.substring(valueStart, valueEnd).trim();
+                const dupContent = value.substring(valueStart, valueEnd).trim();
 
-                let parsedDupValue;
-                if (dupValue.startsWith("'") && dupValue.endsWith("'")) {
-                    parsedDupValue = dupValue.charCodeAt(1);
-                } else if (dupValue.startsWith('"') && dupValue.endsWith('"')) {
-                    parsedDupValue = dupValue.charCodeAt(1);
-                } else {
-                    parsedDupValue = this.parseImmediate(dupValue);
-                }
+                // Parse the content inside DUP() - may contain multiple values
+                const dupBytes = this.parseDB(dupContent, currentAddress);
 
                 for (let i = 0; i < count; i++) {
-                    result.push(isNaN(parsedDupValue) ? 0 : (parsedDupValue & 0xff));
+                    for (const b of dupBytes) {
+                        result.push(b);
+                    }
                 }
             }
         } else if (value.startsWith("'") && value.endsWith("'")) {
@@ -64,7 +68,8 @@ Assembler.prototype.parseDB = function(dataPart) {
                 result.push(str.charCodeAt(i));
             }
         } else if (value === '$') {
-            result.push('$'.charCodeAt(0));
+            // $ = current address/offset location counter
+            result.push(currentAddress !== undefined ? (currentAddress & 0xff) : 0);
         } else {
             const parsedValue = this.parseImmediate(value);
             result.push(isNaN(parsedValue) ? 0 : (parsedValue & 0xff));
@@ -73,17 +78,34 @@ Assembler.prototype.parseDB = function(dataPart) {
     return result;
 };
 
-Assembler.prototype.parseDW = function(dataPart) {
+Assembler.prototype.parseDW = function(dataPart, currentAddress) {
     const result = [];
     const dataWithoutComment = dataPart.split(';')[0].trim();
 
+    // Split by commas, respecting strings and parentheses
     const values = [];
     let currentValue = '';
+    let inString = false;
+    let stringDelimiter = '';
+    let parenDepth = 0;
 
     for (let i = 0; i < dataWithoutComment.length; i++) {
         const char = dataWithoutComment[i];
 
-        if (char === ',' && !currentValue.includes('"') && !currentValue.includes("'")) {
+        if ((char === "'" || char === '"') && !inString) {
+            inString = true;
+            stringDelimiter = char;
+            currentValue += char;
+        } else if (char === stringDelimiter && inString) {
+            inString = false;
+            currentValue += char;
+        } else if (char === '(' && !inString) {
+            parenDepth++;
+            currentValue += char;
+        } else if (char === ')' && !inString) {
+            parenDepth--;
+            currentValue += char;
+        } else if (char === ',' && !inString && parenDepth === 0) {
             values.push(currentValue.trim());
             currentValue = '';
         } else {
@@ -96,14 +118,38 @@ Assembler.prototype.parseDW = function(dataPart) {
     }
 
     for (const value of values) {
-        const parsedValue = this.parseImmediate(value);
-        result.push(isNaN(parsedValue) ? 0 : (parsedValue & 0xff));
-        result.push(isNaN(parsedValue) ? 0 : ((parsedValue >> 8) & 0xff));
+        if (value.includes('DUP(') || value.includes('dup(')) {
+            const dupIndex = value.toLowerCase().indexOf('dup(');
+            if (dupIndex > 0) {
+                const countStr = value.substring(0, dupIndex).trim();
+                const count = parseInt(countStr);
+
+                const valueStart = value.indexOf('(') + 1;
+                const valueEnd = value.lastIndexOf(')');
+                const dupContent = value.substring(valueStart, valueEnd).trim();
+
+                // Parse content inside DUP() recursively
+                const dupWords = this.parseDW(dupContent, currentAddress);
+                for (let i = 0; i < count; i++) {
+                    for (const b of dupWords) {
+                        result.push(b);
+                    }
+                }
+            }
+        } else if (value === '$') {
+            const addr = currentAddress !== undefined ? currentAddress : 0;
+            result.push(addr & 0xff);
+            result.push((addr >> 8) & 0xff);
+        } else {
+            const parsedValue = this.parseImmediate(value);
+            result.push(isNaN(parsedValue) ? 0 : (parsedValue & 0xff));
+            result.push(isNaN(parsedValue) ? 0 : ((parsedValue >> 8) & 0xff));
+        }
     }
     return result;
 };
 
-Assembler.prototype.parseDD = function(dataPart) {
+Assembler.prototype.parseDD = function(dataPart, currentAddress) {
     const result = [];
     const dataWithoutComment = dataPart.split(';')[0].trim();
 
@@ -135,7 +181,7 @@ Assembler.prototype.parseDD = function(dataPart) {
     return result;
 };
 
-Assembler.prototype.parseDQ = function(dataPart) {
+Assembler.prototype.parseDQ = function(dataPart, currentAddress) {
     const result = [];
     const dataWithoutComment = dataPart.split(';')[0].trim();
     const values = [];
@@ -190,7 +236,7 @@ Assembler.prototype.parseDQ = function(dataPart) {
     return result;
 };
 
-Assembler.prototype.parseDT = function(dataPart) {
+Assembler.prototype.parseDT = function(dataPart, currentAddress) {
     const result = [];
     const dataWithoutComment = dataPart.split(';')[0].trim();
     const values = [];

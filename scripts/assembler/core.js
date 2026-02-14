@@ -114,27 +114,25 @@ class Assembler {
             }
 
             // 检查是否是 DB 数据定义
-            let dbIndex = lowerLine.indexOf(' db ');
-            // 处理行首没有标签的情况，如 "DB 'string'"
-            if (dbIndex === -1 && lowerLine.startsWith('db ')) {
-                dbIndex = 0;
-            }
-            if (dbIndex !== -1) {
+            // 使用正则表达式匹配，支持多个空格
+            const dbMatch = lowerLine.match(/^(.*?)\s+db\s+(.+)$/i) || lowerLine.match(/^db\s+(.+)$/i);
+            if (dbMatch) {
                 // 格式：[label] DB expr1, expr2, ...
-                const potentialLabel = line.substring(0, dbIndex).trim();
-                if (potentialLabel && !potentialLabel.startsWith(';')) {
-                    this.symbols[potentialLabel] = address;
-                    this.symbolOriginalCase[potentialLabel.toLowerCase()] = potentialLabel; // 保存原始大小写
+                const potentialLabel = dbMatch[1] ? line.substring(0, line.toLowerCase().indexOf(dbMatch[0].toLowerCase())).trim() + line.substring(line.toLowerCase().indexOf(dbMatch[0].toLowerCase()), line.toLowerCase().indexOf(dbMatch[0].toLowerCase()) + dbMatch[1].length).trim() : '';
+                const dbKeywordIndex = line.toLowerCase().indexOf('db');
+                const realLabel = dbKeywordIndex > 0 ? line.substring(0, dbKeywordIndex).trim() : '';
+                
+                if (realLabel && !realLabel.startsWith(';')) {
+                    this.symbols[realLabel] = address;
+                    this.symbolOriginalCase[realLabel.toLowerCase()] = realLabel; // 保存原始大小写
                     // 如果在数据段，记录变量名
                     if (this.currentSegment === 'data') {
-                        this.dataVariables.push(potentialLabel);
+                        this.dataVariables.push(realLabel);
                     }
                 }
 
-                const dataPart = line.substring(dbIndex + 4).trim();
-                const data = this.parseDB(dataPart);
-
-                // 如果在代码段，存储到 codeDataSegments
+                const dataPart = line.substring(dbKeywordIndex + 2).trim();
+                const data = this.parseDB(dataPart, address);
                 if (this.currentSegment === 'code') {
                     this.codeDataSegments.push({
                         offset: address,
@@ -149,27 +147,24 @@ class Assembler {
             }
 
             // 检查是否是 DW 数据定义
-            let dwIndex = lowerLine.indexOf(' dw ');
-            // 处理行首没有标签的情况，如 "DW 1234h"
-            if (dwIndex === -1 && lowerLine.startsWith('dw ')) {
-                dwIndex = 0;
-            }
-            if (dwIndex !== -1) {
+            // 使用正则表达式匹配，支持多个空格
+            const dwMatch = lowerLine.match(/^(.*?)\s+dw\s+(.+)$/i) || lowerLine.match(/^dw\s+(.+)$/i);
+            if (dwMatch) {
                 // 格式：[label] DW expr1, expr2, ...
-                const potentialLabel = line.substring(0, dwIndex).trim();
-                if (potentialLabel && !potentialLabel.startsWith(';')) {
-                    this.symbols[potentialLabel] = address;
-                    this.symbolOriginalCase[potentialLabel.toLowerCase()] = potentialLabel; // 保存原始大小写
+                const dwKeywordIndex = line.toLowerCase().indexOf('dw');
+                const realLabel = dwKeywordIndex > 0 ? line.substring(0, dwKeywordIndex).trim() : '';
+                
+                if (realLabel && !realLabel.startsWith(';')) {
+                    this.symbols[realLabel] = address;
+                    this.symbolOriginalCase[realLabel.toLowerCase()] = realLabel; // 保存原始大小写
                     // 如果在数据段，记录变量名
                     if (this.currentSegment === 'data') {
-                        this.dataVariables.push(potentialLabel);
+                        this.dataVariables.push(realLabel);
                     }
                 }
 
-                const dataPart = line.substring(dwIndex + 4).trim();
-                const data = this.parseDW(dataPart);
-
-                // 如果在代码段，存储到 codeDataSegments
+                const dataPart = line.substring(dwKeywordIndex + 2).trim();
+                const data = this.parseDW(dataPart, address);
                 if (this.currentSegment === 'code') {
                     this.codeDataSegments.push({
                         offset: address,
@@ -184,27 +179,24 @@ class Assembler {
             }
 
             // 检查是否是 DD 数据定义
-            let ddIndex = lowerLine.indexOf(' dd ');
-            // 处理行首没有标签的情况，如 "DD 12345678h"
-            if (ddIndex === -1 && lowerLine.startsWith('dd ')) {
-                ddIndex = 0;
-            }
-            if (ddIndex !== -1) {
+            // 使用正则表达式匹配，支持多个空格
+            const ddMatch = lowerLine.match(/^(.*?)\s+dd\s+(.+)$/i) || lowerLine.match(/^dd\s+(.+)$/i);
+            if (ddMatch) {
                 // 格式：[label] DD expr1, expr2, ...
-                const potentialLabel = line.substring(0, ddIndex).trim();
-                if (potentialLabel && !potentialLabel.startsWith(';')) {
-                    this.symbols[potentialLabel] = address;
-                    this.symbolOriginalCase[potentialLabel.toLowerCase()] = potentialLabel; // 保存原始大小写
+                const ddKeywordIndex = line.toLowerCase().indexOf('dd');
+                const realLabel = ddKeywordIndex > 0 ? line.substring(0, ddKeywordIndex).trim() : '';
+                
+                if (realLabel && !realLabel.startsWith(';')) {
+                    this.symbols[realLabel] = address;
+                    this.symbolOriginalCase[realLabel.toLowerCase()] = realLabel; // 保存原始大小写
                     // 如果在数据段，记录变量名
                     if (this.currentSegment === 'data') {
-                        this.dataVariables.push(potentialLabel);
+                        this.dataVariables.push(realLabel);
                     }
                 }
 
-                const dataPart = line.substring(ddIndex + 4).trim();
-                const data = this.parseDD(dataPart);
-
-                // 如果在代码段，存储到 codeDataSegments
+                const dataPart = line.substring(ddKeywordIndex + 2).trim();
+                const data = this.parseDD(dataPart, address);
                 if (this.currentSegment === 'code') {
                     this.codeDataSegments.push({
                         offset: address,
@@ -219,19 +211,17 @@ class Assembler {
             }
 
             // 检查是否是 DQ 数据定义（四字，8字节）
-            let dqIndex = lowerLine.indexOf(' dq ');
-            if (dqIndex === -1 && lowerLine.startsWith('dq ')) {
-                dqIndex = 0;
-            }
-            if (dqIndex !== -1) {
-                const potentialLabel = line.substring(0, dqIndex).trim();
+            const dqMatch = lowerLine.match(/^(.*?)\s+dq\s+(.+)$/i) || lowerLine.match(/^dq\s+(.+)$/i);
+            if (dqMatch) {
+                const dqKeywordIndex = line.toLowerCase().indexOf('dq');
+                const potentialLabel = dqKeywordIndex > 0 ? line.substring(0, dqKeywordIndex).trim() : '';
                 if (potentialLabel && !potentialLabel.startsWith(';')) {
                     this.symbols[potentialLabel] = address;
                     this.symbolOriginalCase[potentialLabel.toLowerCase()] = potentialLabel; // 保存原始大小写
                 }
 
-                const dataPart = line.substring(dqIndex + 4).trim();
-                const data = this.parseDQ(dataPart);
+                const dataPart = line.substring(dqKeywordIndex + 2).trim();
+                const data = this.parseDQ(dataPart, address);
 
                 // 如果在代码段，存储到 codeDataSegments
                 if (this.currentSegment === 'code') {
@@ -248,19 +238,17 @@ class Assembler {
             }
 
             // 检查是否是 DT 数据定义（十字节，10字节）
-            let dtIndex = lowerLine.indexOf(' dt ');
-            if (dtIndex === -1 && lowerLine.startsWith('dt ')) {
-                dtIndex = 0;
-            }
-            if (dtIndex !== -1) {
-                const potentialLabel = line.substring(0, dtIndex).trim();
+            const dtMatch = lowerLine.match(/^(.*?)\s+dt\s+(.+)$/i) || lowerLine.match(/^dt\s+(.+)$/i);
+            if (dtMatch) {
+                const dtKeywordIndex = line.toLowerCase().indexOf('dt');
+                const potentialLabel = dtKeywordIndex > 0 ? line.substring(0, dtKeywordIndex).trim() : '';
                 if (potentialLabel && !potentialLabel.startsWith(';')) {
                     this.symbols[potentialLabel] = address;
                     this.symbolOriginalCase[potentialLabel.toLowerCase()] = potentialLabel; // 保存原始大小写
                 }
 
-                const dataPart = line.substring(dtIndex + 4).trim();
-                const data = this.parseDT(dataPart);
+                const dataPart = line.substring(dtKeywordIndex + 2).trim();
+                const data = this.parseDT(dataPart, address);
 
                 // 如果在代码段，存储到 codeDataSegments
                 if (this.currentSegment === 'code') {
@@ -504,20 +492,16 @@ class Assembler {
             // 检查是否是 DB 数据定义（只在数据段处理）
             // 去掉行内注释再小写比较，保证像 "EVEN ; 注释" 也能识别
             const lowerLine2 = line.split(';')[0].trim().toLowerCase();
-            let dbIndex = lowerLine2.indexOf(' db ');
-            // 处理行首没有标签的情况，如 "DB 'string'"
-            if (dbIndex === -1 && lowerLine2.startsWith('db ')) {
-                dbIndex = 0;
-            }
-            if (dbIndex !== -1 && this.currentSegment === 'data') {
-                // 处理 DB 数据定义
-                const dataPart = line.substring(dbIndex + 4).trim();
-                const data = this.parseDB(dataPart);
+            const dbMatch2 = lowerLine2.match(/^(.*?)\s+db\s+(.+)$/i) || lowerLine2.match(/^db\s+(.+)$/i);
+            if (dbMatch2 && this.currentSegment === 'data') {
+                const dbKeywordIndex = line.toLowerCase().indexOf('db');
+                const dataPart = line.substring(dbKeywordIndex + 2).trim();
+                const data = this.parseDB(dataPart, address);
 
                 // 提取标签名称
                 let label = '';
-                if (dbIndex > 0) {
-                    const potentialLabel = line.substring(0, dbIndex).trim();
+                if (dbKeywordIndex > 0) {
+                    const potentialLabel = line.substring(0, dbKeywordIndex).trim();
                     if (potentialLabel && !potentialLabel.startsWith(';')) {
                         label = potentialLabel;
                     }
@@ -535,20 +519,16 @@ class Assembler {
             }
 
             // 检查是否是 DW 数据定义（只在数据段处理）
-            let dwIndex = lowerLine2.indexOf(' dw ');
-            // 处理行首没有标签的情况，如 "DW 1234h"
-            if (dwIndex === -1 && lowerLine2.startsWith('dw ')) {
-                dwIndex = 0;
-            }
-            if (dwIndex !== -1 && this.currentSegment === 'data') {
-                // 处理 DW 数据定义
-                const dataPart = line.substring(dwIndex + 4).trim();
-                const data = this.parseDW(dataPart);
+            const dwMatch2 = lowerLine2.match(/^(.*?)\s+dw\s+(.+)$/i) || lowerLine2.match(/^dw\s+(.+)$/i);
+            if (dwMatch2 && this.currentSegment === 'data') {
+                const dwKeywordIndex = line.toLowerCase().indexOf('dw');
+                const dataPart = line.substring(dwKeywordIndex + 2).trim();
+                const data = this.parseDW(dataPart, address);
 
                 // 提取标签名称
                 let label = '';
-                if (dwIndex > 0) {
-                    const potentialLabel = line.substring(0, dwIndex).trim();
+                if (dwKeywordIndex > 0) {
+                    const potentialLabel = line.substring(0, dwKeywordIndex).trim();
                     if (potentialLabel && !potentialLabel.startsWith(';')) {
                         label = potentialLabel;
                     }
@@ -566,20 +546,16 @@ class Assembler {
             }
 
             // 检查是否是 DD 数据定义（只在数据段处理）
-            let ddIndex = lowerLine2.indexOf(' dd ');
-            // 处理行首没有标签的情况，如 "DD 12345678h"
-            if (ddIndex === -1 && lowerLine2.startsWith('dd ')) {
-                ddIndex = 0;
-            }
-            if (ddIndex !== -1 && this.currentSegment === 'data') {
-                // 处理 DD 数据定义
-                const dataPart = line.substring(ddIndex + 4).trim();
-                const data = this.parseDD(dataPart);
+            const ddMatch2 = lowerLine2.match(/^(.*?)\s+dd\s+(.+)$/i) || lowerLine2.match(/^dd\s+(.+)$/i);
+            if (ddMatch2 && this.currentSegment === 'data') {
+                const ddKeywordIndex = line.toLowerCase().indexOf('dd');
+                const dataPart = line.substring(ddKeywordIndex + 2).trim();
+                const data = this.parseDD(dataPart, address);
 
                 // 提取标签名称
                 let label = '';
-                if (ddIndex > 0) {
-                    const potentialLabel = line.substring(0, ddIndex).trim();
+                if (ddKeywordIndex > 0) {
+                    const potentialLabel = line.substring(0, ddKeywordIndex).trim();
                     if (potentialLabel && !potentialLabel.startsWith(';')) {
                         label = potentialLabel;
                     }
@@ -597,17 +573,15 @@ class Assembler {
             }
 
             // 检查是否是 DQ 数据定义（只在数据段处理）
-            let dqIndex = lowerLine2.indexOf(' dq ');
-            if (dqIndex === -1 && lowerLine2.startsWith('dq ')) {
-                dqIndex = 0;
-            }
-            if (dqIndex !== -1 && this.currentSegment === 'data') {
-                const dataPart = line.substring(dqIndex + 4).trim();
-                const data = this.parseDQ(dataPart);
+            const dqMatch2 = lowerLine2.match(/^(.*?)\s+dq\s+(.+)$/i) || lowerLine2.match(/^dq\s+(.+)$/i);
+            if (dqMatch2 && this.currentSegment === 'data') {
+                const dqKeywordIndex = line.toLowerCase().indexOf('dq');
+                const dataPart = line.substring(dqKeywordIndex + 2).trim();
+                const data = this.parseDQ(dataPart, address);
 
                 let label = '';
-                if (dqIndex > 0) {
-                    const potentialLabel = line.substring(0, dqIndex).trim();
+                if (dqKeywordIndex > 0) {
+                    const potentialLabel = line.substring(0, dqKeywordIndex).trim();
                     if (potentialLabel && !potentialLabel.startsWith(';')) {
                         label = potentialLabel;
                     }
@@ -625,17 +599,15 @@ class Assembler {
             }
 
             // 检查是否是 DT 数据定义（只在数据段处理）
-            let dtIndex = lowerLine2.indexOf(' dt ');
-            if (dtIndex === -1 && lowerLine2.startsWith('dt ')) {
-                dtIndex = 0;
-            }
-            if (dtIndex !== -1 && this.currentSegment === 'data') {
-                const dataPart = line.substring(dtIndex + 4).trim();
-                const data = this.parseDT(dataPart);
+            const dtMatch2 = lowerLine2.match(/^(.*?)\s+dt\s+(.+)$/i) || lowerLine2.match(/^dt\s+(.+)$/i);
+            if (dtMatch2 && this.currentSegment === 'data') {
+                const dtKeywordIndex = line.toLowerCase().indexOf('dt');
+                const dataPart = line.substring(dtKeywordIndex + 2).trim();
+                const data = this.parseDT(dataPart, address);
 
                 let label = '';
-                if (dtIndex > 0) {
-                    const potentialLabel = line.substring(0, dtIndex).trim();
+                if (dtKeywordIndex > 0) {
+                    const potentialLabel = line.substring(0, dtKeywordIndex).trim();
                     if (potentialLabel && !potentialLabel.startsWith(';')) {
                         label = potentialLabel;
                     }

@@ -10,10 +10,14 @@ CPU8086.prototype.handleInt21 = function() {
             return this.int21AH06DirectConsoleIO();
         case 0x07:
             return this.int21AH07DirectInputNoEcho();
+        case 0x08:
+            return this.int21AH08InputNoEcho();
         case 0x09:
             return this.int21AH09DisplayString();
         case 0x0a:
             return this.int21AH0AStringInput();
+        case 0x0b:
+            return this.int21AH0BCheckKeyboardStatus();
         case 0x4c:
             return this.int21AH4CExit();
         case 0x20:
@@ -30,7 +34,13 @@ CPU8086.prototype.int21AH01KeyboardInput = function() {
         this.setRegister('ax', (this.getRegister('ax') & 0xff00) | key);
         this.outputBuffer += String.fromCharCode(key);
         if (this.updateOutputDisplay) {
-            this.updateOutputDisplay();
+            if (!this._displayUpdateScheduled) {
+                this._displayUpdateScheduled = true;
+                requestAnimationFrame(() => {
+                    this._displayUpdateScheduled = false;
+                    this.updateOutputDisplay();
+                });
+            }
         }
         return true;
     } else {
@@ -39,8 +49,8 @@ CPU8086.prototype.int21AH01KeyboardInput = function() {
             this.waitForKeyPress((key) => {
                 this.keyboardBuffer.push(key);
                 this.waitingForKey = false;
-                if (this.updateOutputDisplay) {
-                    this.updateOutputDisplay();
+                if (this.onInputReady) {
+                    setTimeout(() => this.onInputReady(), 0);
                 }
             });
         }
@@ -52,8 +62,17 @@ CPU8086.prototype.int21AH02DisplayChar = function() {
     const dl = this.getRegister('dx') & 0xff;
     const char = this.dosCharToUnicode(dl);
     this.outputBuffer += char;
+    
+    // 使用节流机制，批量更新显示以提升性能
     if (this.updateOutputDisplay) {
-        this.updateOutputDisplay();
+        if (!this._displayUpdateScheduled) {
+            this._displayUpdateScheduled = true;
+            // 使用 requestAnimationFrame 批量更新，提高流畅度
+            requestAnimationFrame(() => {
+                this._displayUpdateScheduled = false;
+                this.updateOutputDisplay();
+            });
+        }
     }
     return true;
 };
@@ -88,7 +107,7 @@ CPU8086.prototype.int21AH06DirectConsoleIO = function() {
 
     if (dl === 0xff) {
         if (this.keyboardBuffer.length > 0) {
-            const key = this.keyboardBuffer[0];
+            const key = this.keyboardBuffer.shift();
             this.setRegister('ax', (this.getRegister('ax') & 0xff00) | key);
             this.flags.zf = 0;
         } else {
@@ -98,7 +117,13 @@ CPU8086.prototype.int21AH06DirectConsoleIO = function() {
         const char = String.fromCharCode(dl);
         this.outputBuffer += char;
         if (this.updateOutputDisplay) {
-            this.updateOutputDisplay();
+            if (!this._displayUpdateScheduled) {
+                this._displayUpdateScheduled = true;
+                requestAnimationFrame(() => {
+                    this._displayUpdateScheduled = false;
+                    this.updateOutputDisplay();
+                });
+            }
         }
     }
     return true;
@@ -115,8 +140,33 @@ CPU8086.prototype.int21AH07DirectInputNoEcho = function() {
             this.waitForKeyPress((key) => {
                 this.keyboardBuffer.push(key);
                 this.waitingForKey = false;
-                if (this.updateOutputDisplay) {
-                    this.updateOutputDisplay();
+                if (this.onInputReady) {
+                    setTimeout(() => this.onInputReady(), 0);
+                }
+            });
+        }
+        return false;
+    }
+};
+
+// AH=08H: 无回显有过滤键盘输入（阻塞，检查Ctrl+C）
+CPU8086.prototype.int21AH08InputNoEcho = function() {
+    if (this.keyboardBuffer.length > 0) {
+        const key = this.keyboardBuffer.shift();
+        // 检查Ctrl+C (ASCII 0x03)
+        if (key === 0x03) {
+            console.log('INT 21H AH=08H: 检测到Ctrl+C');
+        }
+        this.setRegister('ax', (this.getRegister('ax') & 0xff00) | key);
+        return true;
+    } else {
+        if (this.waitForKeyPress && !this.waitingForKey) {
+            this.waitingForKey = true;
+            this.waitForKeyPress((key) => {
+                this.keyboardBuffer.push(key);
+                this.waitingForKey = false;
+                if (this.onInputReady) {
+                    setTimeout(() => this.onInputReady(), 0);
                 }
             });
         }
@@ -135,7 +185,13 @@ CPU8086.prototype.int21AH09DisplayString = function() {
         char = this.readMemory8((ds << 4) + dx);
     }
     if (this.updateOutputDisplay) {
-        this.updateOutputDisplay();
+        if (!this._displayUpdateScheduled) {
+            this._displayUpdateScheduled = true;
+            requestAnimationFrame(() => {
+                this._displayUpdateScheduled = false;
+                this.updateOutputDisplay();
+            });
+        }
     }
     return true;
 };
@@ -144,54 +200,82 @@ CPU8086.prototype.int21AH0AStringInput = function() {
     const ds = this.getSegmentRegister('ds');
     const dx = this.getRegister('dx');
     const bufferAddress = (ds << 4) + dx;
-
     const maxLength = this.readMemory8(bufferAddress);
 
-    if (this.keyboardBuffer.length > 0) {
-        let inputLength = 0;
-        let inputString = '';
+    // 恢复或初始化字符串输入状态
+    if (!this._stringInputState) {
+        this._stringInputState = {
+            bufferAddress: bufferAddress,
+            maxLength: maxLength,
+            inputLength: 0,
+            inputString: '',
+            done: false
+        };
+    }
+    const state = this._stringInputState;
 
-        while (this.keyboardBuffer.length > 0 && inputLength < maxLength) {
-            const key = this.keyboardBuffer.shift();
+    // 处理缓冲区中所有可用的按键
+    while (this.keyboardBuffer.length > 0 && !state.done) {
+        const key = this.keyboardBuffer.shift();
 
-            if (key === 0x0D) {
-                break;
-            } else if (key === 0x08) {
-                if (inputLength > 0) {
-                    inputLength--;
-                    inputString = inputString.slice(0, -1);
-                    this.outputBuffer += '\b \b';
-                }
-            } else {
-                inputString += String.fromCharCode(key);
-                inputLength++;
-                this.outputBuffer += String.fromCharCode(key);
+        if (key === 0x0D) {
+            state.done = true;
+        } else if (key === 0x08) {
+            // 退格
+            if (state.inputLength > 0) {
+                state.inputLength--;
+                state.inputString = state.inputString.slice(0, -1);
+                this.outputBuffer += '\b \b';
+            }
+        } else if (state.inputLength < state.maxLength) {
+            state.inputString += String.fromCharCode(key);
+            state.inputLength++;
+            this.outputBuffer += String.fromCharCode(key);
+            // 达到最大长度也视为完成
+            if (state.inputLength >= state.maxLength) {
+                state.done = true;
             }
         }
-
-        this.writeMemory8(bufferAddress + 1, inputLength);
-        for (let i = 0; i < inputLength; i++) {
-            this.writeMemory8(bufferAddress + 2 + i, inputString.charCodeAt(i));
-        }
-
-        if (this.updateOutputDisplay) {
-            this.updateOutputDisplay();
-        }
-
-        return true;
-    } else {
-        if (this.waitForKeyPress && !this.waitingForKey) {
-            this.waitingForKey = true;
-            this.waitForKeyPress((key) => {
-                this.keyboardBuffer.push(key);
-                this.waitingForKey = false;
-                if (this.updateOutputDisplay) {
-                    this.updateOutputDisplay();
-                }
-            });
-        }
-        return false;
     }
+
+    if (this.updateOutputDisplay) {
+        this.updateOutputDisplay();
+    }
+
+    if (state.done) {
+        // 输入完成，写入缓冲区
+        this.writeMemory8(state.bufferAddress + 1, state.inputLength);
+        for (let i = 0; i < state.inputLength; i++) {
+            this.writeMemory8(state.bufferAddress + 2 + i, state.inputString.charCodeAt(i));
+        }
+        this._stringInputState = null;
+        return true;
+    }
+
+    // 还需要更多输入，继续等待
+    if (this.waitForKeyPress && !this.waitingForKey) {
+        this.waitingForKey = true;
+        this.waitForKeyPress((key) => {
+            this.keyboardBuffer.push(key);
+            this.waitingForKey = false;
+            if (this.onInputReady) {
+                setTimeout(() => this.onInputReady(), 0);
+            }
+        });
+    }
+    return false;
+};
+
+// AH=0BH: 检查键盘状态（非阻塞）
+CPU8086.prototype.int21AH0BCheckKeyboardStatus = function() {
+    if (this.keyboardBuffer.length > 0) {
+        // 有字符可用，AL=0xFF
+        this.setRegister('ax', (this.getRegister('ax') & 0xff00) | 0xff);
+    } else {
+        // 无字符可用，AL=0x00
+        this.setRegister('ax', (this.getRegister('ax') & 0xff00) | 0x00);
+    }
+    return true;
 };
 
 CPU8086.prototype.int21AH4CExit = function() {

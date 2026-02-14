@@ -46,28 +46,6 @@ function initScreen() {
         }
     });
 
-    // 内存上页按钮（向上显示16行 = 256字节）
-    document.getElementById('memory-prev-btn').addEventListener('click', () => {
-        // 向上翻页，偏移地址减少256（16行）
-        const newOffset = Math.max(0, currentMemoryOffset - 256);
-        updateMemoryDisplay(newOffset);
-        // 更新输入框显示
-        document.getElementById('memory-address-input').value = newOffset.toString(16).toUpperCase();
-        // 更新按钮状态
-        updateMemoryPageButtons();
-    });
-
-    // 内存下页按钮（向下显示16行 = 256字节）
-    document.getElementById('memory-next-btn').addEventListener('click', () => {
-        // 向下翻页，偏移地址增加256（16行）
-        const newOffset = currentMemoryOffset + 256;
-        updateMemoryDisplay(newOffset);
-        // 更新输入框显示
-        document.getElementById('memory-address-input').value = newOffset.toString(16).toUpperCase();
-        // 更新按钮状态
-        updateMemoryPageButtons();
-    });
-
     // 内存地址输入回车事件
     document.getElementById('memory-address-input').addEventListener('keypress', (e) => {
         if (e.key === 'Enter') {
@@ -159,11 +137,15 @@ let screenCursorLine = 0;
 let screenCursorCol = 0;
 let processedLength = 0; // 记录已处理的字符数
 
-// HTML转义函数，防止XSS
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+// 单字符HTML转义
+function escapeCharHtml(char) {
+    switch(char) {
+        case '&': return '&amp;';
+        case '<': return '&lt;';
+        case '>': return '&gt;';
+        case ' ': return '&nbsp;';
+        default: return char;
+    }
 }
 
 // 初始化键盘事件监听器（仅初始化一次）
@@ -294,7 +276,7 @@ function updateScreenBuffer(outputText) {
     processedLength = outputText.length;
 }
 
-// 渲染屏幕控制界面 - 支持最多1000行滚动显示
+// 渲染屏幕控制界面 - 支持增量更新避免闪烁
 function renderDisplayControl(memoryGrid) {
     // 初始化键盘监听器
     initScreenKeyboardListener();
@@ -306,26 +288,78 @@ function renderDisplayControl(memoryGrid) {
 
     // 确保至少显示25行
     const displayLines = Math.max(screenBuffer.length, MIN_SCREEN_ROWS);
-    
-    // 渲染显示内容
-    let displayHtml = '';
-    for (let i = 0; i < displayLines; i++) {
-        let lineContent = i < screenBuffer.length ? screenBuffer[i] : ' '.repeat(COLS);
-        let lineClass = 'display-line';
 
-        lineContent = escapeHtml(lineContent);
-        // 处理空格显示
-        lineContent = lineContent.replace(/ /g, '&nbsp;');
+    // 尝试增量更新（DOM已存在时）
+    const linesContainer = memoryGrid.querySelector('.display-lines');
+    if (linesContainer) {
+        // 移除旧光标
+        const oldCursor = linesContainer.querySelector('.cursor-active');
+        if (oldCursor) oldCursor.classList.remove('cursor-active');
 
-        // 将每行按字符分割，为每个字符添加容器
-        const charArray = lineContent.replace(/&nbsp;/g, ' ').split('');
-        let lineWithChars = '';
-        for (let j = 0; j < charArray.length; j++) {
-            const charSpan = `<span class="display-char">${charArray[j] === ' ' ? '&nbsp;' : charArray[j]}</span>`;
-            lineWithChars += charSpan;
+        const existingLineEls = linesContainer.children;
+
+        // 移除多余的行
+        while (existingLineEls.length > displayLines) {
+            linesContainer.removeChild(linesContainer.lastChild);
         }
 
-        displayHtml += `<div class="${lineClass}" data-line="${i}">${lineWithChars}</div>`;
+        // 更新已有行 + 追加新行
+        for (let i = 0; i < displayLines; i++) {
+            const lineContent = i < screenBuffer.length ? screenBuffer[i] : ' '.repeat(COLS);
+
+            if (i < existingLineEls.length) {
+                // 更新已有行的字符
+                const charSpans = existingLineEls[i].children;
+                for (let j = 0; j < COLS; j++) {
+                    const ch = j < lineContent.length ? lineContent[j] : ' ';
+                    const display = ch === ' ' ? '\u00A0' : ch;
+                    if (charSpans[j].textContent !== display) {
+                        charSpans[j].textContent = display;
+                    }
+                }
+            } else {
+                // 创建新行
+                const lineEl = document.createElement('div');
+                lineEl.className = 'display-line';
+                lineEl.dataset.line = i;
+                for (let j = 0; j < COLS; j++) {
+                    const span = document.createElement('span');
+                    span.className = 'display-char';
+                    const ch = j < lineContent.length ? lineContent[j] : ' ';
+                    span.textContent = ch === ' ' ? '\u00A0' : ch;
+                    lineEl.appendChild(span);
+                }
+                linesContainer.appendChild(lineEl);
+            }
+        }
+
+        // 设置光标
+        if (screenCursorLine < displayLines && screenCursorCol < COLS) {
+            const cursorLine = existingLineEls[screenCursorLine];
+            if (cursorLine) {
+                const cursorChar = cursorLine.children[screenCursorCol];
+                if (cursorChar) cursorChar.classList.add('cursor-active');
+            }
+        }
+
+        // 自动滚动到底部
+        const displayContent = memoryGrid.querySelector('.display-content');
+        if (displayContent) {
+            displayContent.scrollTop = displayContent.scrollHeight;
+        }
+        return;
+    }
+
+    // 首次完整渲染
+    let displayHtml = '';
+    for (let i = 0; i < displayLines; i++) {
+        const lineContent = i < screenBuffer.length ? screenBuffer[i] : ' '.repeat(COLS);
+        let lineChars = '';
+        for (let j = 0; j < COLS; j++) {
+            const ch = j < lineContent.length ? lineContent[j] : ' ';
+            lineChars += `<span class="display-char">${escapeCharHtml(ch)}</span>`;
+        }
+        displayHtml += `<div class="display-line" data-line="${i}">${lineChars}</div>`;
     }
 
     memoryGrid.innerHTML = `
@@ -338,18 +372,17 @@ function renderDisplayControl(memoryGrid) {
         </div>
     `;
 
-    // 在光标位置添加光标类（确保光标位置有效）
+    // 设置光标
     if (screenCursorLine < screenBuffer.length && screenCursorCol < COLS) {
-        const cursorLineElement = memoryGrid.querySelector(`.display-line[data-line="${screenCursorLine}"] .display-char:nth-child(${screenCursorCol + 1})`);
-        if (cursorLineElement) {
-            cursorLineElement.classList.add('cursor-active');
+        const cursorEl = memoryGrid.querySelector(`.display-line[data-line="${screenCursorLine}"] .display-char:nth-child(${screenCursorCol + 1})`);
+        if (cursorEl) {
+            cursorEl.classList.add('cursor-active');
         }
     }
 
-    // 自动滚动到最底部（显示最新内容）
+    // 自动滚动到最底部
     const displayContent = memoryGrid.querySelector('.display-content');
     if (displayContent) {
-        // 使用 setTimeout 确保 DOM 已更新
         setTimeout(() => {
             displayContent.scrollTop = displayContent.scrollHeight;
         }, 0);

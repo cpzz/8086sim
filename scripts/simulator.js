@@ -10,10 +10,39 @@ let currentLeftTab = 'screen'; // 当前选中的左侧tab: screen, registers, m
 let previousRegisterValues = {}; // 存储上一次的寄存器值
 let hasExecuted = false; // 跟踪是否已经执行了指令
 let isAtEnd = false; // 跟踪是否执行到了最后一条指令
-let currentState = '初始状态'; // 当前状态：初始状态、已加载文件、单步执行、执行中、已暂停、已执行完毕、遇到断点
+let currentState = '初始状态'; // 当前状态：初始状态、已加载文件、单步执行、执行中、已暂停、已执行完毕、遇到断点、中断
+let interruptResumeMode = null; // 中断恢复模式：'step' 或 'run'
 let shouldScrollToCurrent = false; // 是否需要在更新显示时滚动到当前行
-let segmentWriteAddresses = { cs: new Set(), ds: new Set(), ss: new Set(), es: new Set() }; // 各段写入的地址集合
+let segmentOperationAddresses = { cs: { reads: new Map(), writes: new Map() }, ds: { reads: new Map(), writes: new Map() }, ss: { reads: new Map(), writes: new Map() }, es: { reads: new Map(), writes: new Map() } }; // 各段读写的地址集合（累积，值为步骤号）
+let currentStepOperationAddresses = { cs: { reads: new Set(), writes: new Set() }, ds: { reads: new Set(), writes: new Set() }, ss: { reads: new Set(), writes: new Set() }, es: { reads: new Set(), writes: new Set() } }; // 当前步骤读写的地址集合
+let executionStepCounter = 0; // 执行步骤计数器
 let stackDisplayBase = null; // 堆栈段显示的起始地址（固定后不再改变）
+let previousSegmentValues = { cs: 0x1000, ds: 0x2000, ss: 0x3000, es: 0x4000 }; // 各段寄存器上次值
+
+// 获取当前段的内存显示偏移地址
+function getMemoryDisplayOffset() {
+    const seg = currentMemorySegment;
+    if (cpu.lastSegmentAccessAddress[seg] >= 0) {
+        const base = cpu.getSegmentRegister(seg) << 4;
+        const offset = cpu.lastSegmentAccessAddress[seg] - base;
+        if (offset >= 0 && offset < 65536) {
+            return offset & 0xFFF0; // 对齐到16字节
+        }
+    }
+    return currentMemoryOffset;
+}
+
+// 检查段寄存器是否发生变化
+function checkSegmentRegisterChanges() {
+    for (const seg of ['cs', 'ds', 'ss', 'es']) {
+        const currentVal = cpu.getSegmentRegister(seg);
+        if (currentVal !== previousSegmentValues[seg]) {
+            previousSegmentValues[seg] = currentVal;
+            // 段寄存器变化，更新跟踪地址到新段的起始位置
+            cpu.lastSegmentAccessAddress[seg] = currentVal << 4;
+        }
+    }
+}
 
 // 更新按钮状态
 function updateButtonStates(isRunning) {
@@ -88,6 +117,15 @@ function updateButtonStates(isRunning) {
             document.getElementById('reset-btn').disabled = false;
             break;
 
+        case '中断':
+            // 等待键盘输入时：禁用执行操作，允许加载和重置
+            document.getElementById('run-btn').disabled = true;
+            document.getElementById('step-btn').disabled = true;
+            document.getElementById('pause-btn').disabled = true;
+            document.getElementById('load-btn').disabled = false;
+            document.getElementById('reset-btn').disabled = false;
+            break;
+
         case '已执行完毕':
             // 加载文件按钮: 可用
             // 单步执行按钮: 禁用
@@ -118,19 +156,31 @@ function stepExecution() {
     clearRegisterHighlights();
     // 执行步骤
     const success = cpu.step();
+
+    // 检查是否因中断阻塞（如等待键盘输入）
+    if (!success && cpu.waitingForKey) {
+        currentState = '中断';
+        updateStatusIndicator('中断');
+        interruptResumeMode = 'step';
+        updateButtonStates(false);
+        return;
+    }
+
     // 设置执行状态
     hasExecuted = true;
     // 设置滚动标志，执行后需要滚动到当前行
     shouldScrollToCurrent = true;
     // 检查是否执行到了最后一条指令
     checkIfAtEnd();
-    // 查找各段最后一次写入的地址
-    segmentWriteAddresses = findSegmentWriteAddresses();
+    // 查找各段读写的地址（累积）
+    findSegmentOperationAddresses();
+    // 检查段寄存器变化
+    checkSegmentRegisterChanges();
     // 保存寄存器操作跟踪
     const registerOperations = new Map(cpu.getRegisterOperations());
     // 更新显示
     updateRegistersDisplay(registerOperations);
-    updateMemoryDisplay(0x0000); // 显示从偏移地址0开始的内存内容
+    updateMemoryDisplay(getMemoryDisplayOffset()); // 跟踪内存访问位置
     updateInstructionsDisplay();
     updateScreenDisplay(); // 更新屏幕显示
     // 高亮寄存器值改变
@@ -172,12 +222,36 @@ function runExecution() {
     cpu.run();
     // 确保cpu.running为false
     cpu.running = false;
+
+    // 检查是否因中断阻塞（如等待键盘输入）
+    if (cpu.waitingForKey) {
+        currentState = '中断';
+        updateStatusIndicator('中断');
+        interruptResumeMode = 'run';
+        // 更新显示
+        hasExecuted = true;
+        shouldScrollToCurrent = true;
+        findSegmentOperationAddresses();
+        checkSegmentRegisterChanges();
+        const registerOperations = new Map(cpu.getRegisterOperations());
+        updateRegistersDisplay(registerOperations);
+        updateMemoryDisplay(getMemoryDisplayOffset());
+        updateInstructionsDisplay();
+        updateScreenDisplay();
+        highlightRegisterChanges(registerOperations);
+        highlightIPRegister();
+        updateButtonStates(false);
+        return;
+    }
+
     // 设置执行状态
     hasExecuted = true;
     // 设置滚动标志，执行后需要滚动到当前行
     shouldScrollToCurrent = true;
-    // 查找各段最后一次写入的地址
-    segmentWriteAddresses = findSegmentWriteAddresses();
+    // 查找各段读写的地址（累积）
+    findSegmentOperationAddresses();
+    // 检查段寄存器变化
+    checkSegmentRegisterChanges();
     // 保存寄存器操作跟踪
     const registerOperations = new Map(cpu.getRegisterOperations());
     // 检查是否执行到了最后一条指令
@@ -203,7 +277,7 @@ function runExecution() {
 
     // 更新显示
     updateRegistersDisplay(registerOperations);
-    updateMemoryDisplay(0x0000); // 显示从偏移地址0开始的内存内容
+    updateMemoryDisplay(getMemoryDisplayOffset()); // 跟踪内存访问位置
     updateInstructionsDisplay();
     updateScreenDisplay(); // 更新屏幕显示
     // 更新按钮状态
@@ -228,6 +302,17 @@ function pauseExecution() {
     highlightIPRegister();
 }
 
+// 中断恢复：键盘输入完成后自动恢复执行
+function resumeAfterInterrupt() {
+    const mode = interruptResumeMode;
+    interruptResumeMode = null;
+    if (mode === 'step') {
+        stepExecution();
+    } else if (mode === 'run') {
+        runExecution();
+    }
+}
+
 // 重置模拟器
 function resetSimulator() {
     // 清空内存
@@ -239,10 +324,16 @@ function resetSimulator() {
     // 重置状态变量
     hasExecuted = false;
     isAtEnd = false;
-    segmentWriteAddresses = { cs: new Set(), ds: new Set(), ss: new Set(), es: new Set() };
+    interruptResumeMode = null;
+    cancelKeyboardWait();
+    segmentOperationAddresses = { cs: { reads: new Map(), writes: new Map() }, ds: { reads: new Map(), writes: new Map() }, ss: { reads: new Map(), writes: new Map() }, es: { reads: new Map(), writes: new Map() } };
+    currentStepOperationAddresses = { cs: { reads: new Set(), writes: new Set() }, ds: { reads: new Set(), writes: new Set() }, ss: { reads: new Set(), writes: new Set() }, es: { reads: new Set(), writes: new Set() } };
+    executionStepCounter = 0;
 
     // 清除上一次的寄存器值，确保重置后不会高亮
     previousRegisterValues = {};
+    // 重置段寄存器跟踪
+    previousSegmentValues = { cs: 0x1000, ds: 0x2000, ss: 0x3000, es: 0x4000 };
 
     // 移除所有寄存器的高亮
     const registerItems = document.querySelectorAll('.register-item');
@@ -335,12 +426,19 @@ function handleFileLoad(e) {
             // 重置状态变量
             hasExecuted = false;
             isAtEnd = false;
+            interruptResumeMode = null;
+            cancelKeyboardWait();
             currentState = '已加载文件';
             stackDisplayBase = null; // 重置堆栈显示基址
+            previousSegmentValues = { cs: 0x1000, ds: 0x2000, ss: 0x3000, es: 0x4000 }; // 重置段跟踪
 
             // 清除断点
             breakpoints.clear();
             cpu.breakpoints.clear();
+            // 清除内存高亮
+            segmentOperationAddresses = { cs: { reads: new Map(), writes: new Map() }, ds: { reads: new Map(), writes: new Map() }, ss: { reads: new Map(), writes: new Map() }, es: { reads: new Map(), writes: new Map() } };
+            currentStepOperationAddresses = { cs: { reads: new Set(), writes: new Set() }, ds: { reads: new Set(), writes: new Set() }, ss: { reads: new Set(), writes: new Set() }, es: { reads: new Set(), writes: new Set() } };
+            executionStepCounter = 0;
 
             // 如果有指令，设置CPU的指令指针指向入口点
             if (instructions.length > 0) {
@@ -359,6 +457,10 @@ function handleFileLoad(e) {
             // 写入代码段和数据段到内存
             assembler.writeCodeSegmentToMemory(cpu);
             assembler.writeDataSegmentToMemory(cpu);
+            // 初始化各段跟踪地址
+            for (const seg of ['cs', 'ds', 'ss', 'es']) {
+                cpu.lastSegmentAccessAddress[seg] = cpu.getSegmentRegister(seg) << 4;
+            }
 
             // 清空输出缓冲区（清屏）
             cpu.outputBuffer = '';
@@ -396,6 +498,9 @@ function init() {
 
     // 设置CPU的键盘输入回调
     cpu.waitForKeyPress = handleKeyPress;
+
+    // 设置CPU的中断恢复回调
+    cpu.onInputReady = resumeAfterInterrupt;
 
     // 初始化屏幕
     initScreen();

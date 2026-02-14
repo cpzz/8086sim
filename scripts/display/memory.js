@@ -36,12 +36,28 @@ function initializeSegmentMemory() {
     memory.write8(ssBase + 0xFFFE, 0);
     memory.write8(ssBase + 0xFFFF, 0);
     // 附加段 (ES) 初始化 - 保持随机数据
+
+    // 初始化后，将各段跟踪地址设为段起始位置
+    for (const seg of ['cs', 'ds', 'ss', 'es']) {
+        const base = cpu.getSegmentRegister(seg) << 4;
+        cpu.lastSegmentAccessAddress[seg] = base;
+    }
 }
 
-// 查找各段写入的内存地址
-function findSegmentWriteAddresses() {
+// 查找各段读写的内存地址（累积到已有集合中）
+function findSegmentOperationAddresses() {
     const memoryOperations = cpu.getMemoryOperations();
-    const segmentWrites = { cs: new Set(), ds: new Set(), ss: new Set(), es: new Set() };
+
+    // 步骤计数器递增
+    executionStepCounter++;
+
+    // 重置当前步骤的操作地址
+    currentStepOperationAddresses = {
+        cs: { reads: new Set(), writes: new Set() },
+        ds: { reads: new Set(), writes: new Set() },
+        ss: { reads: new Set(), writes: new Set() },
+        es: { reads: new Set(), writes: new Set() }
+    };
 
     // 获取各段基址
     const csBase = cpu.getSegmentRegister('cs') << 4;
@@ -49,125 +65,58 @@ function findSegmentWriteAddresses() {
     const ssBase = cpu.getSegmentRegister('ss') << 4;
     const esBase = cpu.getSegmentRegister('es') << 4;
 
-    // 遍历所有内存操作，找到各段所有写入的地址
+    const bases = { cs: csBase, ds: dsBase, ss: ssBase, es: esBase };
+
+    // 遍历所有内存操作，累积到全局（记录步骤号）+ 记录当前步骤
     memoryOperations.forEach((operation, address) => {
-        if (operation.type === 'write') {
-            // 判断地址属于哪个段
-            if (address >= csBase && address < csBase + 65536) {
-                segmentWrites.cs.add(address);
-            }
-            if (address >= dsBase && address < dsBase + 65536) {
-                segmentWrites.ds.add(address);
-            }
-            if (address >= ssBase && address < ssBase + 65536) {
-                segmentWrites.ss.add(address);
-            }
-            if (address >= esBase && address < esBase + 65536) {
-                segmentWrites.es.add(address);
+        for (const seg of ['cs', 'ds', 'ss', 'es']) {
+            if (address >= bases[seg] && address < bases[seg] + 65536) {
+                if (operation.type === 'write') {
+                    segmentOperationAddresses[seg].writes.set(address, executionStepCounter);
+                    currentStepOperationAddresses[seg].writes.add(address);
+                } else {
+                    segmentOperationAddresses[seg].reads.set(address, executionStepCounter);
+                    currentStepOperationAddresses[seg].reads.add(address);
+                }
             }
         }
     });
-
-    return segmentWrites;
 }
 // 获取当前内存地址
 function getCurrentMemoryAddress() {
     return cpu.getCurrentAddress();
 }
 
-// 更新内存显示
+// 当前渲染上下文（供滚动事件handler引用，避免闭包捕获旧值）
+let _memoryRenderCtx = null;
+
+// 更新内存显示 - 虚拟滚动
 function updateMemoryDisplay(offsetAddress) {
     const memoryGrid = document.getElementById('memory-grid');
-    // 不再需要检查 display 段，因为用户界面现在是独立的tab
 
-    // 限制偏移地址在有效范围内（0 - 0xFFFF）
-    // 确保最后一页能显示到0xFFFF，最大起始地址为0xFF00
-    const maxOffset = 0xFF00;
-    const clampedOffset = Math.max(0, Math.min(offsetAddress, maxOffset));
-
-    // 保存当前偏移地址
-    currentMemoryOffset = clampedOffset;
-
-    // 更新翻页按钮状态
-    updateMemoryPageButtons();
+    // 总行数 = 64K / 16 = 4096
+    const TOTAL_ROWS = 4096;
+    const ROW_HEIGHT = 28; // 每行像素高度
 
     // 根据当前选中的段寄存器计算实际内存地址
     const segmentValue = cpu.getSegmentRegister(currentMemorySegment);
     const segmentBase = segmentValue << 4;
 
-    // 堆栈段特殊处理：从高地址向低地址显示
-    let startAddress, memoryRows;
-    if (currentMemorySegment === 'ss') {
-        // 第一次显示堆栈段时，计算并固定显示的起始地址
-        if (stackDisplayBase === null) {
-            // 显示从 0xFF00 开始，共256字节（从高到低）
-            // 这样可以看到栈的使用情况，地址固定不会变化
-            stackDisplayBase = segmentBase + 0xFF00;
-        }
-        startAddress = stackDisplayBase;
+    // 限制偏移地址在有效范围内
+    const clampedOffset = Math.max(0, Math.min(offsetAddress, 0xFFFF)) & 0xFFF0; // 对齐到16字节
+    currentMemoryOffset = clampedOffset;
 
-        // 获取原始内存数据
-        const memoryDump = memory.getMemoryDump(startAddress, 256);
-
-        // 创建倒序的内存行（从高地址到低地址）
-        memoryRows = [];
-        for (let rowIdx = memoryDump.length - 1; rowIdx >= 0; rowIdx--) {
-            memoryRows.push(memoryDump[rowIdx]);
-        }
-    } else {
-        // 其他段：正常从低地址到高地址显示
-        startAddress = (segmentBase) + clampedOffset;
-        memoryRows = memory.getMemoryDump(startAddress, 256);
-        // 重置堆栈显示基址（切换到其他段后再切回来时重新计算）
-        stackDisplayBase = null;
-    }
-
-    // 创建表头和内存内容的容器结构
-    memoryGrid.innerHTML = '';
-
-    // 创建表头容器（固定）
-    const headerContainer = document.createElement('div');
-    headerContainer.className = 'memory-header-container';
-    headerContainer.innerHTML = `
-        <div class="memory-address">地址</div>
-        <div class="memory-bytes">
-            <div class="memory-byte header">0</div>
-            <div class="memory-byte header">1</div>
-            <div class="memory-byte header">2</div>
-            <div class="memory-byte header">3</div>
-            <div class="memory-byte header">4</div>
-            <div class="memory-byte header">5</div>
-            <div class="memory-byte header">6</div>
-            <div class="memory-byte header">7</div>
-            <div class="memory-byte header">8</div>
-            <div class="memory-byte header">9</div>
-            <div class="memory-byte header">A</div>
-            <div class="memory-byte header">B</div>
-            <div class="memory-byte header">C</div>
-            <div class="memory-byte header">D</div>
-            <div class="memory-byte header">E</div>
-            <div class="memory-byte header">F</div>
-        </div>
-        <div class="memory-ascii">ASCII</div>
-    `;
-    memoryGrid.appendChild(headerContainer);
-
-    // 创建内存内容容器（可滚动）
-    const bodyContainer = document.createElement('div');
-    bodyContainer.className = 'memory-body-container';
+    // 堆栈段特殊处理
+    const isStack = (currentMemorySegment === 'ss');
 
     // 在CS段时，找到当前指令并确定需要高亮的地址范围
-    let currentInstructionAddresses = []; // 存储当前指令的所有物理地址
+    let currentInstructionAddresses = [];
     if (currentMemorySegment === 'cs') {
         const csBase = cpu.getSegmentRegister('cs') << 4;
         const currentIP = cpu.ip;
-
-        // 查找当前IP对应的指令
         const currentInstruction = instructions.find(inst =>
             currentIP >= inst.address && currentIP < inst.address + inst.length
         );
-
-        // 如果找到指令，计算其所有字节的物理地址
         if (currentInstruction) {
             for (let i = 0; i < currentInstruction.length; i++) {
                 currentInstructionAddresses.push(csBase + currentInstruction.address + i);
@@ -175,86 +124,186 @@ function updateMemoryDisplay(offsetAddress) {
         }
     }
 
-    memoryRows.forEach(row => {
-        const rowElement = document.createElement('div');
-        rowElement.className = 'memory-row';
+    // 计算可见行数（根据容器实际高度）
+    function getVisibleRows(container) {
+        const h = container.clientHeight;
+        return Math.max(16, Math.ceil(h / ROW_HEIGHT) + 1); // 至少16行，多渲染1行保证无空白
+    }
 
-        const addressElement = document.createElement('div');
-        addressElement.className = 'memory-address';
-        // 显示段:偏移格式的地址
-        const segmentAddr = segmentValue.toString(16).toUpperCase().padStart(4, '0');
-        const offsetAddr = (row.address - (segmentValue << 4)).toString(16).toUpperCase().padStart(4, '0');
-        addressElement.textContent = `${currentMemorySegment.toUpperCase()}:${offsetAddr} (${row.address.toString(16).toUpperCase().padStart(5, '0')})`;
-
-        const bytesElement = document.createElement('div');
-        bytesElement.className = 'memory-bytes';
-
-        row.bytes.forEach((byte, index) => {
-            const currentAddress = row.address + index;
-            const byteElement = document.createElement('div');
-            byteElement.className = 'memory-byte';
-
-            // CS段：高亮当前指令的所有字节
-            if (currentMemorySegment === 'cs' && currentInstructionAddresses.includes(currentAddress)) {
-                byteElement.classList.add('current');
+    // 渲染指定行范围的内容
+    function renderRows(startRow, visibleRows, container) {
+        container.innerHTML = '';
+        const rowCount = Math.min(visibleRows, TOTAL_ROWS - startRow);
+        for (let r = 0; r < rowCount; r++) {
+            let rowIndex = startRow + r;
+            // 堆栈段倒序显示
+            if (isStack) {
+                rowIndex = TOTAL_ROWS - 1 - (startRow + r);
             }
+            const rowOffset = rowIndex * 16;
+            const physAddr = segmentBase + rowOffset;
+            const rowData = memory.getMemoryDump(physAddr, 16)[0];
 
-            // 根据当前段进行高亮（写入操作）
-            const writeAddresses = segmentWriteAddresses[currentMemorySegment];
-            if (writeAddresses && writeAddresses.has(currentAddress)) {
-                if (currentMemorySegment === 'cs') {
-                    // CS段用红色高亮，表示错误的写入
-                    byteElement.classList.add('write', 'error');
-                } else {
-                    // DS、SS、ES段用普通写入高亮
-                    byteElement.classList.add('write');
+            const rowEl = document.createElement('div');
+            rowEl.className = 'memory-row';
+
+            const addrEl = document.createElement('div');
+            addrEl.className = 'memory-address';
+            const segHex = segmentValue.toString(16).toUpperCase().padStart(4, '0');
+            addrEl.textContent = `${segHex}:${rowOffset.toString(16).toUpperCase().padStart(4, '0')}`;
+
+            const bytesEl = document.createElement('div');
+            bytesEl.className = 'memory-bytes';
+            rowData.bytes.forEach((byte, index) => {
+                const currentAddress = physAddr + index;
+                const byteEl = document.createElement('div');
+                byteEl.className = 'memory-byte';
+
+                if (currentMemorySegment === 'cs' && currentInstructionAddresses.includes(currentAddress)) {
+                    byteEl.classList.add('current');
                 }
+                const segOps = segmentOperationAddresses[currentMemorySegment];
+                const stepOps = currentStepOperationAddresses[currentMemorySegment];
+                if (segOps) {
+                    if (segOps.writes.has(currentAddress)) {
+                        if (currentMemorySegment === 'cs') {
+                            byteEl.classList.add('write', 'error');
+                        } else {
+                            byteEl.classList.add('write');
+                        }
+                        if (stepOps && stepOps.writes.has(currentAddress)) {
+                            byteEl.classList.add('last');
+                        } else {
+                            const age = executionStepCounter - segOps.writes.get(currentAddress);
+                            const level = Math.min(5, age);
+                            byteEl.classList.add('fade-' + level);
+                        }
+                    } else if (segOps.reads.has(currentAddress)) {
+                        byteEl.classList.add('read');
+                        if (stepOps && stepOps.reads.has(currentAddress)) {
+                            byteEl.classList.add('last');
+                        } else {
+                            const age = executionStepCounter - segOps.reads.get(currentAddress);
+                            const level = Math.min(5, age);
+                            byteEl.classList.add('fade-' + level);
+                        }
+                    }
+                }
+                byteEl.textContent = byte;
+                bytesEl.appendChild(byteEl);
+            });
+
+            const asciiEl = document.createElement('div');
+            asciiEl.className = 'memory-ascii';
+            asciiEl.textContent = rowData.ascii;
+
+            rowEl.appendChild(addrEl);
+            rowEl.appendChild(bytesEl);
+            rowEl.appendChild(asciiEl);
+            container.appendChild(rowEl);
+        }
+    }
+
+    // 更新渲染上下文（滚动handler通过此引用获取最新的渲染函数和状态）
+    _memoryRenderCtx = { renderRows, isStack, getVisibleRows, TOTAL_ROWS, ROW_HEIGHT };
+
+    // 检查是否已有DOM结构
+    let headerContainer = memoryGrid.querySelector('.memory-header-container');
+    let bodyContainer = memoryGrid.querySelector('.memory-body-container');
+    let scrollContent = memoryGrid.querySelector('.memory-scroll-content');
+    let spacer = memoryGrid.querySelector('.memory-spacer');
+    let rowsContainer = memoryGrid.querySelector('.memory-rows-container');
+
+    if (!headerContainer) {
+        // 首次构建DOM结构
+        memoryGrid.innerHTML = '';
+
+        headerContainer = document.createElement('div');
+        headerContainer.className = 'memory-header-container';
+        headerContainer.innerHTML = `
+            <div class="memory-address">地址</div>
+            <div class="memory-bytes">
+                ${['0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'].map(h => `<div class="memory-byte header">${h}</div>`).join('')}
+            </div>
+            <div class="memory-ascii">ASCII</div>
+        `;
+        memoryGrid.appendChild(headerContainer);
+
+        bodyContainer = document.createElement('div');
+        bodyContainer.className = 'memory-body-container';
+
+        scrollContent = document.createElement('div');
+        scrollContent.className = 'memory-scroll-content';
+
+        spacer = document.createElement('div');
+        spacer.className = 'memory-spacer';
+        spacer.style.height = `${TOTAL_ROWS * ROW_HEIGHT}px`;
+
+        rowsContainer = document.createElement('div');
+        rowsContainer.className = 'memory-rows-container';
+
+        scrollContent.appendChild(spacer);
+        scrollContent.appendChild(rowsContainer);
+        bodyContainer.appendChild(scrollContent);
+        memoryGrid.appendChild(bodyContainer);
+
+        // 滚动事件驱动虚拟渲染 - 通过 _memoryRenderCtx 引用最新的渲染函数
+        bodyContainer.addEventListener('scroll', () => {
+            if (!_memoryRenderCtx) return;
+            const ctx = _memoryRenderCtx;
+            const scrollTop = bodyContainer.scrollTop;
+            const visibleRows = ctx.getVisibleRows(bodyContainer);
+            const startRow = Math.floor(scrollTop / ctx.ROW_HEIGHT);
+            const clampedRow = Math.min(startRow, Math.max(0, ctx.TOTAL_ROWS - visibleRows));
+            rowsContainer.style.top = `${clampedRow * ctx.ROW_HEIGHT}px`;
+            ctx.renderRows(clampedRow, visibleRows, rowsContainer);
+            // 更新偏移地址记录
+            if (ctx.isStack) {
+                currentMemoryOffset = (ctx.TOTAL_ROWS - 1 - clampedRow) * 16;
+            } else {
+                currentMemoryOffset = clampedRow * 16;
             }
-
-            byteElement.textContent = byte;
-            bytesElement.appendChild(byteElement);
         });
-
-        const asciiElement = document.createElement('div');
-        asciiElement.className = 'memory-ascii';
-        asciiElement.textContent = row.ascii;
-
-        rowElement.appendChild(addressElement);
-        rowElement.appendChild(bytesElement);
-        rowElement.appendChild(asciiElement);
-
-        bodyContainer.appendChild(rowElement);
-    });
-
-    memoryGrid.appendChild(bodyContainer);
-}
-
-// 更新内存翻页按钮状态
-function updateMemoryPageButtons() {
-    const prevBtn = document.getElementById('memory-prev-btn');
-    const nextBtn = document.getElementById('memory-next-btn');
-
-    if (prevBtn) {
-        // 当偏移地址为0时，禁用"上页"按钮
-        prevBtn.disabled = (currentMemoryOffset === 0);
     }
 
-    if (nextBtn) {
-        // 当最后一行显示0xFFFF时（偏移 >= 0xFF00），禁用"下页"按钮
-        // 每页显示16行(256字节)，最后一页起始地址为0xFF00
-        // 0xFF00 + 0xFF = 0xFFFF，确保0xFFFF在最后一行显示
-        nextBtn.disabled = (currentMemoryOffset >= 0xFF00);
+    // 更新spacer高度（段切换时可能需要）
+    spacer.style.height = `${TOTAL_ROWS * ROW_HEIGHT}px`;
+
+    // 计算目标行
+    let targetRow;
+    if (isStack) {
+        stackDisplayBase = segmentBase + 0xFF00;
+        targetRow = Math.max(0, TOTAL_ROWS - 1 - Math.floor(clampedOffset / 16));
+    } else {
+        targetRow = Math.floor(clampedOffset / 16);
+        stackDisplayBase = null;
     }
+
+    // 判断目标行是否已在可见范围内，不在时才自动滚动
+    const visibleRows = getVisibleRows(bodyContainer);
+    const currentScrollTop = bodyContainer.scrollTop;
+    const currentStartRow = Math.floor(currentScrollTop / ROW_HEIGHT);
+    const currentEndRow = currentStartRow + visibleRows - 1;
+
+    if (targetRow < currentStartRow || targetRow > currentEndRow) {
+        // 目标行不可见，自动滚动使其居中显示
+        const centerRow = Math.max(0, targetRow - Math.floor(visibleRows / 2));
+        bodyContainer.scrollTop = centerRow * ROW_HEIGHT;
+    }
+
+    // 渲染当前可见行
+    const actualScrollTop = bodyContainer.scrollTop;
+    const startRow = Math.floor(actualScrollTop / ROW_HEIGHT);
+    const clampedRow = Math.min(startRow, Math.max(0, TOTAL_ROWS - visibleRows));
+    rowsContainer.style.top = `${clampedRow * ROW_HEIGHT}px`;
+    renderRows(clampedRow, visibleRows, rowsContainer);
 }
 
 // 解析地址（始终按16进制处理，空白返回0）
 function parseAddress(addressStr) {
-    // 去除空白字符
     const trimmed = addressStr.trim();
-    // 空白返回0
     if (!trimmed) {
         return 0;
     }
-    // 始终按16进制解析（不管有没有0x前缀）
     return parseInt(trimmed, 16);
 }

@@ -29,9 +29,39 @@ Assembler.prototype.parseInstruction = function(line, address) {
     operandsPartProcessed = operandsPartProcessed.replace(/\bbyte\s+ptr\s+/gi, '');
     operandsPartProcessed = operandsPartProcessed.replace(/\bword\s+ptr\s+/gi, '');
 
-    const operands = operandsPartProcessed.split(/[,\s]+/).filter(Boolean).map(op => op.toLowerCase());
+    // 智能分割操作数，正确处理引号内的字符（如 ' ' 不会被拆开）
+    function smartSplitOperands(str) {
+        const result = [];
+        let current = '';
+        let inQuote = false;
+        let quoteChar = '';
+        for (let i = 0; i < str.length; i++) {
+            const ch = str[i];
+            if (!inQuote && (ch === "'" || ch === '"')) {
+                inQuote = true;
+                quoteChar = ch;
+                current += ch;
+            } else if (inQuote && ch === quoteChar) {
+                inQuote = false;
+                current += ch;
+            } else if (!inQuote && (ch === ',' || ch === ' ' || ch === '\t')) {
+                if (current.length > 0) {
+                    result.push(current);
+                    current = '';
+                }
+            } else {
+                current += ch;
+            }
+        }
+        if (current.length > 0) {
+            result.push(current);
+        }
+        return result;
+    }
+
+    const operands = smartSplitOperands(operandsPartProcessed).map(op => op.toLowerCase());
     // 提取原始操作数（不转换为小写），用于标签匹配
-    const originalOperands = operandsPartProcessed.split(/[,\s]+/).filter(Boolean);
+    const originalOperands = smartSplitOperands(operandsPartProcessed);
 
     const length = this.getInstructionLength(line);
 
@@ -128,9 +158,13 @@ Assembler.prototype.parseInstruction = function(line, address) {
                 };
             }
             // 支持8位寄存器到寄存器的ADD指令
-            if (reg8Map.hasOwnProperty(operands[0]) && reg8Map.hasOwnProperty(operands[1])) {
-                const dstReg = reg8Map[operands[0]];
-                const srcReg = reg8Map[operands[1]];
+            const addReg8MapAll = {
+                'al': 0, 'cl': 1, 'dl': 2, 'bl': 3,
+                'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7
+            };
+            if (addReg8MapAll.hasOwnProperty(operands[0]) && addReg8MapAll.hasOwnProperty(operands[1])) {
+                const dstReg = addReg8MapAll[operands[0]];
+                const srcReg = addReg8MapAll[operands[1]];
                 // ADD r/m8, r8 - 操作码00, mod=11, reg=源寄存器, rm=目标寄存器
                 const modRM = (3 << 6) | (srcReg << 3) | dstReg;
                 return {
@@ -144,7 +178,8 @@ Assembler.prototype.parseInstruction = function(line, address) {
             }
             break;
         case 'sub':
-            if (operands[0] === 'al') {
+            // SUB AL, imm8
+            if (operands[0] === 'al' && this.isImmediate(operands[1])) {
                 const imm8 = this.parseImmediate(operands[1]);
                 return {
                     address,
@@ -155,7 +190,8 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     originalLine: originalLine.trim()
                 };
             }
-            if (operands[0] === 'ax') {
+            // SUB AX, imm16
+            if (operands[0] === 'ax' && this.isImmediate(operands[1])) {
                 const imm16 = this.parseImmediate(operands[1]);
                 return {
                     address,
@@ -166,113 +202,71 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     originalLine: originalLine.trim()
                 };
             }
-            if (operands[0] === 'bx' && operands[1] === 'cx') {
-                // SUB BX, CX - mod=11, reg=001(CX), rm=011(BX), opcode=29
-                return {
-                    address,
-                    opcode: 'SUB',
-                    operands: ['BX', 'CX'],
-                    machineCode: [0x29, 0xcb],
-                    length,
-                    originalLine: originalLine.trim()
+            // SUB r16, r16 (generic) - 操作码29, mod=11, reg=源寄存器, rm=目标寄存器
+            {
+                const subRegMap = {
+                    'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
+                    'sp': 4, 'bp': 5, 'si': 6, 'di': 7
                 };
-            }
-            if (operands[0] === 'ax' && operands[1] === 'cx') {
-                // SUB AX, CX - mod=11, reg=001(CX), rm=000(AX), opcode=2b
-                return {
-                    address,
-                    opcode: 'SUB',
-                    operands: ['AX', 'CX'],
-                    machineCode: [0x2b, 0xc8],
-                    length,
-                    originalLine: originalLine.trim()
+                const subReg8Map = {
+                    'al': 0, 'cl': 1, 'dl': 2, 'bl': 3,
+                    'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7
                 };
-            }
-            if (operands[0] === 'ax' && operands[1] === 'bx') {
-                // SUB AX, BX - mod=11, reg=011(BX), rm=000(AX), opcode=2b
-                return {
-                    address,
-                    opcode: 'SUB',
-                    operands: ['AX', 'BX'],
-                    machineCode: [0x2b, 0xd8],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'bx' && operands[1] === 'ax') {
-                // SUB BX, AX - mod=11, reg=000(AX), rm=011(BX), opcode=29
-                return {
-                    address,
-                    opcode: 'SUB',
-                    operands: ['BX', 'AX'],
-                    machineCode: [0x29, 0xd8],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'cx' && operands[1] === 'ax') {
-                // SUB CX, AX - mod=11, reg=000(AX), rm=001(CX), opcode=29
-                return {
-                    address,
-                    opcode: 'SUB',
-                    operands: ['CX', 'AX'],
-                    machineCode: [0x29, 0xc8],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'cx' && operands[1] === 'bx') {
-                // SUB CX, BX - mod=11, reg=011(BX), rm=001(CX), opcode=29
-                return {
-                    address,
-                    opcode: 'SUB',
-                    operands: ['CX', 'BX'],
-                    machineCode: [0x29, 0xd9],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'dx' && operands[1] === 'ax') {
-                // SUB DX, AX - mod=11, reg=000(AX), rm=010(DX), opcode=29
-                return {
-                    address,
-                    opcode: 'SUB',
-                    operands: ['DX', 'AX'],
-                    machineCode: [0x29, 0xc2],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'dx' && operands[1] === 'bx') {
-                // SUB DX, BX - mod=11, reg=011(BX), rm=010(DX), opcode=29
-                return {
-                    address,
-                    opcode: 'SUB',
-                    operands: ['DX', 'BX'],
-                    machineCode: [0x29, 0xda],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            // 支持更多寄存器到寄存器的SUB指令
-            const subRegMap = {
-                'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
-                'sp': 4, 'bp': 5, 'si': 6, 'di': 7
-            };
-            if (subRegMap.hasOwnProperty(operands[0]) && subRegMap.hasOwnProperty(operands[1])) {
-                const dstReg = subRegMap[operands[0]];
-                const srcReg = subRegMap[operands[1]];
-                // SUB r/m16, r16 - 操作码29, mod=11, reg=源寄存器, rm=目标寄存器
-                // mod=11 (二进制) 表示寄存器寻址模式
-                const modRM = (3 << 6) | (srcReg << 3) | dstReg;
-                return {
-                    address,
-                    opcode: 'SUB',
-                    operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
-                    machineCode: [0x29, modRM],
-                    length,
-                    originalLine: originalLine.trim()
-                };
+                if (subRegMap.hasOwnProperty(operands[0]) && subRegMap.hasOwnProperty(operands[1])) {
+                    const dstReg = subRegMap[operands[0]];
+                    const srcReg = subRegMap[operands[1]];
+                    const modRM = (3 << 6) | (srcReg << 3) | dstReg;
+                    return {
+                        address,
+                        opcode: 'SUB',
+                        operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                        machineCode: [0x29, modRM],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                // SUB r8, r8
+                if (subReg8Map.hasOwnProperty(operands[0]) && subReg8Map.hasOwnProperty(operands[1])) {
+                    const dstReg = subReg8Map[operands[0]];
+                    const srcReg = subReg8Map[operands[1]];
+                    const modRM = (3 << 6) | (srcReg << 3) | dstReg;
+                    return {
+                        address,
+                        opcode: 'SUB',
+                        operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                        machineCode: [0x28, modRM],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                // SUB r16, imm16 (non-AX)
+                if (subRegMap.hasOwnProperty(operands[0]) && this.isImmediate(operands[1])) {
+                    const reg = subRegMap[operands[0]];
+                    const imm16 = this.parseImmediate(operands[1]);
+                    const modRM = (3 << 6) | (5 << 3) | reg; // reg=5 for SUB in group
+                    return {
+                        address,
+                        opcode: 'SUB',
+                        operands: [operands[0].toUpperCase(), operands[1]],
+                        machineCode: [0x81, modRM, imm16 & 0xff, (imm16 >> 8) & 0xff],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                // SUB r8, imm8 (non-AL)
+                if (subReg8Map.hasOwnProperty(operands[0]) && this.isImmediate(operands[1])) {
+                    const reg = subReg8Map[operands[0]];
+                    const imm8 = this.parseImmediate(operands[1]);
+                    const modRM = (3 << 6) | (5 << 3) | reg; // reg=5 for SUB in group
+                    return {
+                        address,
+                        opcode: 'SUB',
+                        operands: [operands[0].toUpperCase(), operands[1]],
+                        machineCode: [0x80, modRM, imm8],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                }
             }
             break;
         case 'and':
@@ -374,7 +368,8 @@ Assembler.prototype.parseInstruction = function(line, address) {
             }
             break;
         case 'or':
-            if (operands[0] === 'al') {
+            // OR AL, imm8
+            if (operands[0] === 'al' && this.isImmediate(operands[1])) {
                 const imm8 = this.parseImmediate(operands[1]);
                 return {
                     address,
@@ -385,7 +380,8 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     originalLine: originalLine.trim()
                 };
             }
-            if (operands[0] === 'ax') {
+            // OR AX, imm16
+            if (operands[0] === 'ax' && this.isImmediate(operands[1])) {
                 const imm16 = this.parseImmediate(operands[1]);
                 return {
                     address,
@@ -396,39 +392,76 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     originalLine: originalLine.trim()
                 };
             }
-            if (operands[0] === 'bx' && operands[1].startsWith('0x')) {
-                const imm16 = this.parseImmediate(operands[1]);
-                return {
-                    address,
-                    opcode: 'OR',
-                    operands: ['BX', operands[1]],
-                    machineCode: [0x81, 0xcb, imm16 & 0xff, (imm16 >> 8) & 0xff],
-                    length,
-                    originalLine: originalLine.trim()
+            // OR r16, r16 (generic)
+            {
+                const orRegMap = {
+                    'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
+                    'sp': 4, 'bp': 5, 'si': 6, 'di': 7
                 };
-            }
-            // 支持更多寄存器到寄存器的OR指令
-            const orRegMap = {
-                'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
-                'sp': 4, 'bp': 5, 'si': 6, 'di': 7
-            };
-            if (orRegMap.hasOwnProperty(operands[0]) && orRegMap.hasOwnProperty(operands[1])) {
-                const dstReg = orRegMap[operands[0]];
-                const srcReg = orRegMap[operands[1]];
-                // OR r/m16, r16 - 操作码09, mod=11, reg=源寄存器, rm=目标寄存器
-                const modRM = (3 << 6) | (srcReg << 3) | dstReg;
-                return {
-                    address,
-                    opcode: 'OR',
-                    operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
-                    machineCode: [0x09, modRM],
-                    length,
-                    originalLine: originalLine.trim()
+                const orReg8Map = {
+                    'al': 0, 'cl': 1, 'dl': 2, 'bl': 3,
+                    'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7
                 };
+                if (orRegMap.hasOwnProperty(operands[0]) && orRegMap.hasOwnProperty(operands[1])) {
+                    const dstReg = orRegMap[operands[0]];
+                    const srcReg = orRegMap[operands[1]];
+                    const modRM = (3 << 6) | (srcReg << 3) | dstReg;
+                    return {
+                        address,
+                        opcode: 'OR',
+                        operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                        machineCode: [0x09, modRM],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                // OR r8, r8
+                if (orReg8Map.hasOwnProperty(operands[0]) && orReg8Map.hasOwnProperty(operands[1])) {
+                    const dstReg = orReg8Map[operands[0]];
+                    const srcReg = orReg8Map[operands[1]];
+                    const modRM = (3 << 6) | (srcReg << 3) | dstReg;
+                    return {
+                        address,
+                        opcode: 'OR',
+                        operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                        machineCode: [0x08, modRM],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                // OR r16, imm16 (non-AX)
+                if (orRegMap.hasOwnProperty(operands[0]) && this.isImmediate(operands[1])) {
+                    const reg = orRegMap[operands[0]];
+                    const imm16 = this.parseImmediate(operands[1]);
+                    const modRM = (3 << 6) | (1 << 3) | reg; // reg=1 for OR in group
+                    return {
+                        address,
+                        opcode: 'OR',
+                        operands: [operands[0].toUpperCase(), operands[1]],
+                        machineCode: [0x81, modRM, imm16 & 0xff, (imm16 >> 8) & 0xff],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                // OR r8, imm8 (non-AL)
+                if (orReg8Map.hasOwnProperty(operands[0]) && this.isImmediate(operands[1])) {
+                    const reg = orReg8Map[operands[0]];
+                    const imm8 = this.parseImmediate(operands[1]);
+                    const modRM = (3 << 6) | (1 << 3) | reg; // reg=1 for OR in group
+                    return {
+                        address,
+                        opcode: 'OR',
+                        operands: [operands[0].toUpperCase(), operands[1]],
+                        machineCode: [0x80, modRM, imm8],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                }
             }
             break;
         case 'xor':
-            if (operands[0] === 'al') {
+            // XOR AL, imm8
+            if (operands[0] === 'al' && this.isImmediate(operands[1])) {
                 const imm8 = this.parseImmediate(operands[1]);
                 return {
                     address,
@@ -439,18 +472,8 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     originalLine: originalLine.trim()
                 };
             }
-            if (operands[0] === 'ax' && operands[1] === 'ax') {
-                // XOR AX, AX - 清零寄存器，使用2字节编码
-                return {
-                    address,
-                    opcode: 'XOR',
-                    operands: ['AX', 'AX'],
-                    machineCode: [0x31, 0xc0],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'ax') {
+            // XOR AX, imm16
+            if (operands[0] === 'ax' && this.isImmediate(operands[1])) {
                 const imm16 = this.parseImmediate(operands[1]);
                 return {
                     address,
@@ -461,69 +484,70 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     originalLine: originalLine.trim()
                 };
             }
-            if (operands[0] === 'cx' && operands[1] === 'dx') {
-                return {
-                    address,
-                    opcode: 'XOR',
-                    operands: ['CX', 'DX'],
-                    machineCode: [0x31, 0xd1],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'cx' && operands[1] === 'cx') {
-                // XOR CX, CX - 清零寄存器
-                return {
-                    address,
-                    opcode: 'XOR',
-                    operands: ['CX', 'CX'],
-                    machineCode: [0x31, 0xc9],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'dx' && operands[1] === 'dx') {
-                // XOR DX, DX - 清零寄存器
-                return {
-                    address,
-                    opcode: 'XOR',
-                    operands: ['DX', 'DX'],
-                    machineCode: [0x31, 0xd2],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'bx' && operands[1] === 'bx') {
-                // XOR BX, BX - 清零寄存器
-                return {
-                    address,
-                    opcode: 'XOR',
-                    operands: ['BX', 'BX'],
-                    machineCode: [0x31, 0xdb],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            // 通用寄存器-寄存器 XOR (16位) - 使用 0x31 指令
-            const reg16MapXor = { 'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3, 'sp': 4, 'bp': 5, 'si': 6, 'di': 7 };
-            if (reg16MapXor.hasOwnProperty(operands[0]) && reg16MapXor.hasOwnProperty(operands[1])) {
-                const reg1 = reg16MapXor[operands[0]];
-                const reg2 = reg16MapXor[operands[1]];
-                // 0x31: XOR r/m16, r16
-                // ModR/M: mod=11(寄存器), reg=reg1, rm=reg2
-                const modRM = (3 << 6) | (reg1 << 3) | reg2;
-                return {
-                    address,
-                    opcode: 'XOR',
-                    operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
-                    machineCode: [0x31, modRM],
-                    length,
-                    originalLine: originalLine.trim()
-                };
+            // XOR r16, r16 (generic) - 0x31: XOR r/m16, r16 (reg=source, rm=dest)
+            {
+                const xorRegMap = { 'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3, 'sp': 4, 'bp': 5, 'si': 6, 'di': 7 };
+                const xorReg8Map = { 'al': 0, 'cl': 1, 'dl': 2, 'bl': 3, 'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7 };
+                if (xorRegMap.hasOwnProperty(operands[0]) && xorRegMap.hasOwnProperty(operands[1])) {
+                    const dstReg = xorRegMap[operands[0]];
+                    const srcReg = xorRegMap[operands[1]];
+                    const modRM = (3 << 6) | (srcReg << 3) | dstReg;
+                    return {
+                        address,
+                        opcode: 'XOR',
+                        operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                        machineCode: [0x31, modRM],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                // XOR r8, r8
+                if (xorReg8Map.hasOwnProperty(operands[0]) && xorReg8Map.hasOwnProperty(operands[1])) {
+                    const dstReg = xorReg8Map[operands[0]];
+                    const srcReg = xorReg8Map[operands[1]];
+                    const modRM = (3 << 6) | (srcReg << 3) | dstReg;
+                    return {
+                        address,
+                        opcode: 'XOR',
+                        operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                        machineCode: [0x30, modRM],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                // XOR r16, imm16 (non-AX)
+                if (xorRegMap.hasOwnProperty(operands[0]) && this.isImmediate(operands[1])) {
+                    const reg = xorRegMap[operands[0]];
+                    const imm16 = this.parseImmediate(operands[1]);
+                    const modRM = (3 << 6) | (6 << 3) | reg; // reg=6 for XOR in group
+                    return {
+                        address,
+                        opcode: 'XOR',
+                        operands: [operands[0].toUpperCase(), operands[1]],
+                        machineCode: [0x81, modRM, imm16 & 0xff, (imm16 >> 8) & 0xff],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                // XOR r8, imm8 (non-AL)
+                if (xorReg8Map.hasOwnProperty(operands[0]) && this.isImmediate(operands[1])) {
+                    const reg = xorReg8Map[operands[0]];
+                    const imm8 = this.parseImmediate(operands[1]);
+                    const modRM = (3 << 6) | (6 << 3) | reg; // reg=6 for XOR in group
+                    return {
+                        address,
+                        opcode: 'XOR',
+                        operands: [operands[0].toUpperCase(), operands[1]],
+                        machineCode: [0x80, modRM, imm8],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                }
             }
             break;
         case 'adc':
-            if (operands[0] === 'al') {
+            // ADC AL, imm8
+            if (operands[0] === 'al' && this.isImmediate(operands[1])) {
                 const imm8 = this.parseImmediate(operands[1]);
                 return {
                     address,
@@ -534,7 +558,8 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     originalLine: originalLine.trim()
                 };
             }
-            if (operands[0] === 'ax') {
+            // ADC AX, imm16
+            if (operands[0] === 'ax' && this.isImmediate(operands[1])) {
                 const imm16 = this.parseImmediate(operands[1]);
                 return {
                     address,
@@ -544,6 +569,66 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     length,
                     originalLine: originalLine.trim()
                 };
+            }
+            // ADC r16, r16 (generic)
+            {
+                const adcRegMap = { 'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3, 'sp': 4, 'bp': 5, 'si': 6, 'di': 7 };
+                const adcReg8Map = { 'al': 0, 'cl': 1, 'dl': 2, 'bl': 3, 'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7 };
+                if (adcRegMap.hasOwnProperty(operands[0]) && adcRegMap.hasOwnProperty(operands[1])) {
+                    const dstReg = adcRegMap[operands[0]];
+                    const srcReg = adcRegMap[operands[1]];
+                    const modRM = (3 << 6) | (srcReg << 3) | dstReg;
+                    return {
+                        address,
+                        opcode: 'ADC',
+                        operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                        machineCode: [0x11, modRM],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                // ADC r8, r8
+                if (adcReg8Map.hasOwnProperty(operands[0]) && adcReg8Map.hasOwnProperty(operands[1])) {
+                    const dstReg = adcReg8Map[operands[0]];
+                    const srcReg = adcReg8Map[operands[1]];
+                    const modRM = (3 << 6) | (srcReg << 3) | dstReg;
+                    return {
+                        address,
+                        opcode: 'ADC',
+                        operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                        machineCode: [0x10, modRM],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                // ADC r16, imm16 (non-AX)
+                if (adcRegMap.hasOwnProperty(operands[0]) && this.isImmediate(operands[1])) {
+                    const reg = adcRegMap[operands[0]];
+                    const imm16 = this.parseImmediate(operands[1]);
+                    const modRM = (3 << 6) | (2 << 3) | reg; // reg=2 for ADC in group
+                    return {
+                        address,
+                        opcode: 'ADC',
+                        operands: [operands[0].toUpperCase(), operands[1]],
+                        machineCode: [0x81, modRM, imm16 & 0xff, (imm16 >> 8) & 0xff],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                // ADC r8, imm8 (non-AL)
+                if (adcReg8Map.hasOwnProperty(operands[0]) && this.isImmediate(operands[1])) {
+                    const reg = adcReg8Map[operands[0]];
+                    const imm8 = this.parseImmediate(operands[1]);
+                    const modRM = (3 << 6) | (2 << 3) | reg; // reg=2 for ADC in group
+                    return {
+                        address,
+                        opcode: 'ADC',
+                        operands: [operands[0].toUpperCase(), operands[1]],
+                        machineCode: [0x80, modRM, imm8],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                }
             }
             break;
         case 'mov': {
@@ -1008,7 +1093,7 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     address,
                     opcode: 'MOV',
                     operands: ['AX', 'SS'],
-                    machineCode: [0x8c, 0xe0],
+                    machineCode: [0x8c, 0xd0],
                     length,
                     originalLine: originalLine.trim()
                 };
@@ -1018,7 +1103,7 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     address,
                     opcode: 'MOV',
                     operands: ['AX', 'ES'],
-                    machineCode: [0x8c, 0xe8],
+                    machineCode: [0x8c, 0xc0],
                     length,
                     originalLine: originalLine.trim()
                 };
@@ -1435,9 +1520,9 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     }
                 }
 
-                // 处理寄存器间接寻址：[si], [bx], [di] 等
+                // 处理寄存器间接寻址：[si], [bx], [di] 等，以及直接地址 [0000h]
                 if (isMemoryOp0) {
-                    const memReg = operands[0].substring(1, operands[0].length - 1).toLowerCase().trim();
+                    const memContent = operands[0].substring(1, operands[0].length - 1).toLowerCase().trim();
                     const regMap = {
                         'bx': 7,
                         'si': 4,
@@ -1445,8 +1530,8 @@ Assembler.prototype.parseInstruction = function(line, address) {
                         'bp': 6
                     };
 
-                    if (regMap.hasOwnProperty(memReg)) {
-                        const rm = regMap[memReg];
+                    if (regMap.hasOwnProperty(memContent)) {
+                        const rm = regMap[memContent];
                         // 判断是否是8位立即数
                         let is8BitImmReg = imm16 >= 0 && imm16 <= 255;
                         // 如果指定了 word ptr，强制使用 16 位操作
@@ -1479,6 +1564,80 @@ Assembler.prototype.parseInstruction = function(line, address) {
                                 originalLine: originalLine.trim()
                             };
                         }
+                    } else if (memContent.includes('+')) {
+                        // 处理 [reg+disp] 格式，如 [bx+10h]
+                        const parts = memContent.split('+').map(p => p.trim());
+                        const regPart = parts[0];
+                        const dispPart = parts.slice(1).join('+').trim();
+                        if (regMap.hasOwnProperty(regPart)) {
+                            const rm = regMap[regPart];
+                            const disp = this.parseImmediate(dispPart);
+                            const disp8 = disp >= -128 && disp <= 127;
+
+                            if (is8BitImm) {
+                                if (disp8) {
+                                    const modRM = (1 << 6) | (0 << 3) | rm;
+                                    return {
+                                        address, opcode: 'MOV',
+                                        operands: [operands[0].toUpperCase(), operands[1]],
+                                        machineCode: [0xc6, modRM, disp & 0xff, imm16 & 0xff],
+                                        length, originalLine: originalLine.trim()
+                                    };
+                                } else {
+                                    const modRM = (2 << 6) | (0 << 3) | rm;
+                                    return {
+                                        address, opcode: 'MOV',
+                                        operands: [operands[0].toUpperCase(), operands[1]],
+                                        machineCode: [0xc6, modRM, disp & 0xff, (disp >> 8) & 0xff, imm16 & 0xff],
+                                        length, originalLine: originalLine.trim()
+                                    };
+                                }
+                            } else {
+                                if (disp8) {
+                                    const modRM = (1 << 6) | (0 << 3) | rm;
+                                    return {
+                                        address, opcode: 'MOV',
+                                        operands: [operands[0].toUpperCase(), operands[1]],
+                                        machineCode: [0xc7, modRM, disp & 0xff, imm16 & 0xff, (imm16 >> 8) & 0xff],
+                                        length, originalLine: originalLine.trim()
+                                    };
+                                } else {
+                                    const modRM = (2 << 6) | (0 << 3) | rm;
+                                    return {
+                                        address, opcode: 'MOV',
+                                        operands: [operands[0].toUpperCase(), operands[1]],
+                                        machineCode: [0xc7, modRM, disp & 0xff, (disp >> 8) & 0xff, imm16 & 0xff, (imm16 >> 8) & 0xff],
+                                        length, originalLine: originalLine.trim()
+                                    };
+                                }
+                            }
+                        }
+                    } else {
+                        // 直接地址寻址 [0000h] - MOV [disp16], imm
+                        const offset = this.parseImmediate(memContent);
+                        if (!isNaN(offset)) {
+                            if (is8BitImm) {
+                                // MOV [disp16], imm8 - C6 06 disp16 imm8
+                                return {
+                                    address,
+                                    opcode: 'MOV',
+                                    operands: [operands[0].toUpperCase(), operands[1]],
+                                    machineCode: [0xc6, 0x06, offset & 0xff, (offset >> 8) & 0xff, imm16 & 0xff],
+                                    length,
+                                    originalLine: originalLine.trim()
+                                };
+                            } else {
+                                // MOV [disp16], imm16 - C7 06 disp16 imm16
+                                return {
+                                    address,
+                                    opcode: 'MOV',
+                                    operands: [operands[0].toUpperCase(), operands[1]],
+                                    machineCode: [0xc7, 0x06, offset & 0xff, (offset >> 8) & 0xff, imm16 & 0xff, (imm16 >> 8) & 0xff],
+                                    length,
+                                    originalLine: originalLine.trim()
+                                };
+                            }
+                        }
                     }
                 }
             }
@@ -1508,49 +1667,95 @@ Assembler.prototype.parseInstruction = function(line, address) {
                 };
             }
             break;
-        case 'shl':
+        case 'sal':  // SAL is identical to SHL
+        case 'shl': {
+            const shlOpName = opcode.toUpperCase();
             if (operands[1] === '1') {
-                // 处理 SHL r/m, 1 指令
-                const regMap = {
-                    'al': { opcode: 0xd0, modrm: 0xe0 },
-                    'ax': { opcode: 0xd1, modrm: 0xe0 },
-                    'bl': { opcode: 0xd0, modrm: 0xe3 },
-                    'bx': { opcode: 0xd1, modrm: 0xe3 },
-                    'cl': { opcode: 0xd0, modrm: 0xe1 },
-                    'cx': { opcode: 0xd1, modrm: 0xe1 },
-                    'dl': { opcode: 0xd0, modrm: 0xe2 },
-                    'dx': { opcode: 0xd1, modrm: 0xe2 },
-                    'si': { opcode: 0xd1, modrm: 0xe6 },
-                    'di': { opcode: 0xd1, modrm: 0xe7 }
+                // SHL/SAL r/m, 1 (reg=4 for SHL/SAL in ModR/M)
+                const reg8Map = {
+                    'al': 0, 'cl': 1, 'dl': 2, 'bl': 3,
+                    'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7
                 };
-
-                if (regMap.hasOwnProperty(operands[0])) {
-                    const info = regMap[operands[0]];
+                const reg16Map = {
+                    'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
+                    'sp': 4, 'bp': 5, 'si': 6, 'di': 7
+                };
+                if (reg8Map.hasOwnProperty(operands[0])) {
+                    const rm = reg8Map[operands[0]];
+                    const modRM = (3 << 6) | (4 << 3) | rm;
                     return {
                         address,
-                        opcode: 'SHL',
+                        opcode: shlOpName,
                         operands: [operands[0].toUpperCase(), '1'],
-                        machineCode: [info.opcode, info.modrm],
+                        machineCode: [0xd0, modRM],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (reg16Map.hasOwnProperty(operands[0])) {
+                    const rm = reg16Map[operands[0]];
+                    const modRM = (3 << 6) | (4 << 3) | rm;
+                    return {
+                        address,
+                        opcode: shlOpName,
+                        operands: [operands[0].toUpperCase(), '1'],
+                        machineCode: [0xd1, modRM],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                }
+            }
+            if (operands[1] === 'cl') {
+                // SHL/SAL r/m, CL
+                const reg8Map = {
+                    'al': 0, 'cl': 1, 'dl': 2, 'bl': 3,
+                    'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7
+                };
+                const reg16Map = {
+                    'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
+                    'sp': 4, 'bp': 5, 'si': 6, 'di': 7
+                };
+                if (reg8Map.hasOwnProperty(operands[0])) {
+                    const rm = reg8Map[operands[0]];
+                    const modRM = (3 << 6) | (4 << 3) | rm;
+                    return {
+                        address,
+                        opcode: shlOpName,
+                        operands: [operands[0].toUpperCase(), 'CL'],
+                        machineCode: [0xd2, modRM],
+                        length,
+                        originalLine: originalLine.trim()
+                    };
+                }
+                if (reg16Map.hasOwnProperty(operands[0])) {
+                    const rm = reg16Map[operands[0]];
+                    const modRM = (3 << 6) | (4 << 3) | rm;
+                    return {
+                        address,
+                        opcode: shlOpName,
+                        operands: [operands[0].toUpperCase(), 'CL'],
+                        machineCode: [0xd3, modRM],
                         length,
                         originalLine: originalLine.trim()
                     };
                 }
             }
             break;
+        }
         case 'shr': {
-            // 处理 SHR r/m, 1 指令
+            // 处理 SHR r/m, 1 指令 (reg=5 for SHR in ModR/M)
             if (operands[1] === '1') {
                 const regMap = {
-                    'al': { opcode: 0xd0, modrm: 0xe0 },
-                    'ax': { opcode: 0xd1, modrm: 0xe0 },
-                    'bl': { opcode: 0xd0, modrm: 0xe3 },
-                    'bx': { opcode: 0xd1, modrm: 0xe3 },
-                    'cl': { opcode: 0xd0, modrm: 0xe1 },
-                    'cx': { opcode: 0xd1, modrm: 0xe1 },
-                    'dl': { opcode: 0xd0, modrm: 0xe2 },
-                    'dx': { opcode: 0xd1, modrm: 0xe2 },
-                    'si': { opcode: 0xd1, modrm: 0xe6 },
-                    'di': { opcode: 0xd1, modrm: 0xe7 }
+                    'al': { opcode: 0xd0, modrm: 0xe8 },
+                    'ax': { opcode: 0xd1, modrm: 0xe8 },
+                    'bl': { opcode: 0xd0, modrm: 0xeb },
+                    'bx': { opcode: 0xd1, modrm: 0xeb },
+                    'cl': { opcode: 0xd0, modrm: 0xe9 },
+                    'cx': { opcode: 0xd1, modrm: 0xe9 },
+                    'dl': { opcode: 0xd0, modrm: 0xea },
+                    'dx': { opcode: 0xd1, modrm: 0xea },
+                    'si': { opcode: 0xd1, modrm: 0xee },
+                    'di': { opcode: 0xd1, modrm: 0xef }
                 };
 
                 if (regMap.hasOwnProperty(operands[0])) {
@@ -1604,120 +1809,66 @@ Assembler.prototype.parseInstruction = function(line, address) {
             }
             break;
         }
-        case 'push':
-            if (operands[0] === 'ax') {
+        case 'push': {
+            const pushRegMap = {
+                'ax': 0x50, 'cx': 0x51, 'dx': 0x52, 'bx': 0x53,
+                'sp': 0x54, 'bp': 0x55, 'si': 0x56, 'di': 0x57
+            };
+            const pushSegMap = {
+                'es': 0x06, 'cs': 0x0e, 'ss': 0x16, 'ds': 0x1e
+            };
+            if (pushRegMap.hasOwnProperty(operands[0])) {
                 return {
                     address,
                     opcode: 'PUSH',
-                    operands: ['AX'],
-                    machineCode: [0x50],
+                    operands: [operands[0].toUpperCase()],
+                    machineCode: [pushRegMap[operands[0]]],
                     length,
                     originalLine: originalLine.trim()
                 };
-            } else if (operands[0] === 'bx') {
+            }
+            if (pushSegMap.hasOwnProperty(operands[0])) {
                 return {
                     address,
                     opcode: 'PUSH',
-                    operands: ['BX'],
-                    machineCode: [0x53],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            } else if (operands[0] === 'cx') {
-                return {
-                    address,
-                    opcode: 'PUSH',
-                    operands: ['CX'],
-                    machineCode: [0x51],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            } else if (operands[0] === 'dx') {
-                return {
-                    address,
-                    opcode: 'PUSH',
-                    operands: ['DX'],
-                    machineCode: [0x52],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            } else if (operands[0] === 'si') {
-                return {
-                    address,
-                    opcode: 'PUSH',
-                    operands: ['SI'],
-                    machineCode: [0x56],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            } else if (operands[0] === 'di') {
-                return {
-                    address,
-                    opcode: 'PUSH',
-                    operands: ['DI'],
-                    machineCode: [0x57],
+                    operands: [operands[0].toUpperCase()],
+                    machineCode: [pushSegMap[operands[0]]],
                     length,
                     originalLine: originalLine.trim()
                 };
             }
             break;
-        case 'pop':
-            if (operands[0] === 'ax') {
+        }
+        case 'pop': {
+            const popRegMap = {
+                'ax': 0x58, 'cx': 0x59, 'dx': 0x5a, 'bx': 0x5b,
+                'sp': 0x5c, 'bp': 0x5d, 'si': 0x5e, 'di': 0x5f
+            };
+            const popSegMap = {
+                'es': 0x07, 'ss': 0x17, 'ds': 0x1f
+            };
+            if (popRegMap.hasOwnProperty(operands[0])) {
                 return {
                     address,
                     opcode: 'POP',
-                    operands: ['AX'],
-                    machineCode: [0x58],
+                    operands: [operands[0].toUpperCase()],
+                    machineCode: [popRegMap[operands[0]]],
                     length,
                     originalLine: originalLine.trim()
                 };
-            } else if (operands[0] === 'bx') {
+            }
+            if (popSegMap.hasOwnProperty(operands[0])) {
                 return {
                     address,
                     opcode: 'POP',
-                    operands: ['BX'],
-                    machineCode: [0x5b],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            } else if (operands[0] === 'cx') {
-                return {
-                    address,
-                    opcode: 'POP',
-                    operands: ['CX'],
-                    machineCode: [0x59],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            } else if (operands[0] === 'dx') {
-                return {
-                    address,
-                    opcode: 'POP',
-                    operands: ['DX'],
-                    machineCode: [0x5a],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            } else if (operands[0] === 'si') {
-                return {
-                    address,
-                    opcode: 'POP',
-                    operands: ['SI'],
-                    machineCode: [0x5e],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            } else if (operands[0] === 'di') {
-                return {
-                    address,
-                    opcode: 'POP',
-                    operands: ['DI'],
-                    machineCode: [0x5f],
+                    operands: [operands[0].toUpperCase()],
+                    machineCode: [popSegMap[operands[0]]],
                     length,
                     originalLine: originalLine.trim()
                 };
             }
             break;
+        }
         case 'cmp':
             // 处理 CMP r8, imm8 指令
             const cmpReg8Map = {
@@ -1836,7 +1987,7 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     operands: [originalOperands[0]],
                     machineCode: [0xe8, offset16 & 0xff, (offset16 >> 8) & 0xff],
                     length,
-                    originalLine: 'CALL'
+                    originalLine: originalLine.trim()
                 };
             }
             // 处理 CALL FAR label 格式
@@ -1849,7 +2000,7 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     operands: ['FAR', originalOperands[1]],
                     machineCode: [0x9a, targetAddress & 0xff, (targetAddress >> 8) & 0xff, 0x00, 0x00], // 简化处理，段地址设为0
                     length,
-                    originalLine: 'CALL FAR'
+                    originalLine: originalLine.trim()
                 };
             }
             break;
@@ -1865,7 +2016,7 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     operands: [originalOperands[0]],
                     machineCode: [0xe9, offset16 & 0xff, (offset16 >> 8) & 0xff],
                     length,
-                    originalLine: 'JMP'
+                    originalLine: originalLine.trim()
                 };
             }
             // 处理 JMP SHORT label 格式
@@ -1880,7 +2031,7 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     operands: ['SHORT', originalOperands[1]],
                     machineCode: [0xeb, offset8],
                     length,
-                    originalLine: 'JMP SHORT'
+                    originalLine: originalLine.trim()
                 };
             }
             // 处理 JMP FAR label 格式
@@ -1893,7 +2044,7 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     operands: ['FAR', operands[1]],
                     machineCode: [0xea, targetAddress & 0xff, (targetAddress >> 8) & 0xff, 0x00, 0x00], // 简化处理，段地址设为0
                     length,
-                    originalLine: 'JMP FAR'
+                    originalLine: originalLine.trim()
                 };
             }
             break;
@@ -1911,7 +2062,7 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     operands: [originalOperands[0]],
                     machineCode: [0x74, offset8],
                     length,
-                    originalLine: opcode === 'jz' ? 'JZ' : 'JE'
+                    originalLine: originalLine.trim()
                 };
             }
             break;
@@ -1929,20 +2080,23 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     operands: [originalOperands[0]],
                     machineCode: [0x75, offset8],
                     length,
-                    originalLine: opcode === 'jnz' ? 'JNZ' : 'JNE'
+                    originalLine: originalLine.trim()
                 };
             }
             break;
-        case 'sbb':
-            // 支持更多寄存器到寄存器的SBB指令
+        case 'sbb': {
+            // SBB r16, r16 (generic)
             const sbbRegMap = {
                 'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3,
                 'sp': 4, 'bp': 5, 'si': 6, 'di': 7
             };
+            const sbbReg8Map = {
+                'al': 0, 'cl': 1, 'dl': 2, 'bl': 3,
+                'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7
+            };
             if (sbbRegMap.hasOwnProperty(operands[0]) && sbbRegMap.hasOwnProperty(operands[1])) {
                 const dstReg = sbbRegMap[operands[0]];
                 const srcReg = sbbRegMap[operands[1]];
-                // SBB r/m16, r16 - 操作码19, mod=11, reg=源寄存器, rm=目标寄存器
                 const modRM = (3 << 6) | (srcReg << 3) | dstReg;
                 return {
                     address,
@@ -1953,7 +2107,22 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     originalLine: originalLine.trim()
                 };
             }
-            if (operands[0] === 'al') {
+            // SBB r8, r8
+            if (sbbReg8Map.hasOwnProperty(operands[0]) && sbbReg8Map.hasOwnProperty(operands[1])) {
+                const dstReg = sbbReg8Map[operands[0]];
+                const srcReg = sbbReg8Map[operands[1]];
+                const modRM = (3 << 6) | (srcReg << 3) | dstReg;
+                return {
+                    address,
+                    opcode: 'SBB',
+                    operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                    machineCode: [0x18, modRM],
+                    length,
+                    originalLine: originalLine.trim()
+                };
+            }
+            // SBB AL, imm8
+            if (operands[0] === 'al' && this.isImmediate(operands[1])) {
                 const imm8 = this.parseImmediate(operands[1]);
                 return {
                     address,
@@ -1964,7 +2133,8 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     originalLine: originalLine.trim()
                 };
             }
-            if (operands[0] === 'ax') {
+            // SBB AX, imm16
+            if (operands[0] === 'ax' && this.isImmediate(operands[1])) {
                 const imm16 = this.parseImmediate(operands[1]);
                 return {
                     address,
@@ -1975,171 +2145,80 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     originalLine: originalLine.trim()
                 };
             }
-            break;
-        case 'neg':
-            if (operands[0] === 'al') {
+            // SBB r16, imm16 (non-AX)
+            if (sbbRegMap.hasOwnProperty(operands[0]) && this.isImmediate(operands[1])) {
+                const reg = sbbRegMap[operands[0]];
+                const imm16 = this.parseImmediate(operands[1]);
+                const modRM = (3 << 6) | (3 << 3) | reg; // reg=3 for SBB in group
                 return {
                     address,
-                    opcode: 'NEG',
-                    operands: ['AL'],
-                    machineCode: [0xf6, 0xd8],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'ax') {
-                return {
-                    address,
-                    opcode: 'NEG',
-                    operands: ['AX'],
-                    machineCode: [0xf7, 0xd8],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'bl') {
-                return {
-                    address,
-                    opcode: 'NEG',
-                    operands: ['BL'],
-                    machineCode: [0xf6, 0xdb],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'bx') {
-                return {
-                    address,
-                    opcode: 'NEG',
-                    operands: ['BX'],
-                    machineCode: [0xf7, 0xdb],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'cl') {
-                return {
-                    address,
-                    opcode: 'NEG',
-                    operands: ['CL'],
-                    machineCode: [0xf6, 0xd9],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'cx') {
-                return {
-                    address,
-                    opcode: 'NEG',
-                    operands: ['CX'],
-                    machineCode: [0xf7, 0xd9],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'dl') {
-                return {
-                    address,
-                    opcode: 'NEG',
-                    operands: ['DL'],
-                    machineCode: [0xf6, 0xda],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'dx') {
-                return {
-                    address,
-                    opcode: 'NEG',
-                    operands: ['DX'],
-                    machineCode: [0xf7, 0xda],
+                    opcode: 'SBB',
+                    operands: [operands[0].toUpperCase(), operands[1]],
+                    machineCode: [0x81, modRM, imm16 & 0xff, (imm16 >> 8) & 0xff],
                     length,
                     originalLine: originalLine.trim()
                 };
             }
             break;
-        case 'not':
-            if (operands[0] === 'al') {
+        }
+        case 'neg': {
+            // NEG r8: 0xF6, ModR/M with reg=3
+            // NEG r16: 0xF7, ModR/M with reg=3
+            const negReg8Map = { 'al': 0, 'cl': 1, 'dl': 2, 'bl': 3, 'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7 };
+            const negReg16Map = { 'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3, 'sp': 4, 'bp': 5, 'si': 6, 'di': 7 };
+            if (negReg8Map.hasOwnProperty(operands[0])) {
+                const rm = negReg8Map[operands[0]];
                 return {
                     address,
-                    opcode: 'NOT',
-                    operands: ['AL'],
-                    machineCode: [0xf6, 0xd0],
+                    opcode: 'NEG',
+                    operands: [operands[0].toUpperCase()],
+                    machineCode: [0xf6, (3 << 6) | (3 << 3) | rm],
                     length,
                     originalLine: originalLine.trim()
                 };
             }
-            if (operands[0] === 'ax') {
+            if (negReg16Map.hasOwnProperty(operands[0])) {
+                const rm = negReg16Map[operands[0]];
                 return {
                     address,
-                    opcode: 'NOT',
-                    operands: ['AX'],
-                    machineCode: [0xf7, 0xd0],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'bl') {
-                return {
-                    address,
-                    opcode: 'NOT',
-                    operands: ['BL'],
-                    machineCode: [0xf6, 0xd3],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'bx') {
-                return {
-                    address,
-                    opcode: 'NOT',
-                    operands: ['BX'],
-                    machineCode: [0xf7, 0xd3],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'cl') {
-                return {
-                    address,
-                    opcode: 'NOT',
-                    operands: ['CL'],
-                    machineCode: [0xf6, 0xd1],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'cx') {
-                return {
-                    address,
-                    opcode: 'NOT',
-                    operands: ['CX'],
-                    machineCode: [0xf7, 0xd1],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'dl') {
-                return {
-                    address,
-                    opcode: 'NOT',
-                    operands: ['DL'],
-                    machineCode: [0xf6, 0xd2],
-                    length,
-                    originalLine: originalLine.trim()
-                };
-            }
-            if (operands[0] === 'dx') {
-                return {
-                    address,
-                    opcode: 'NOT',
-                    operands: ['DX'],
-                    machineCode: [0xf7, 0xd2],
+                    opcode: 'NEG',
+                    operands: [operands[0].toUpperCase()],
+                    machineCode: [0xf7, (3 << 6) | (3 << 3) | rm],
                     length,
                     originalLine: originalLine.trim()
                 };
             }
             break;
+        }
+        case 'not': {
+            // NOT r8: 0xF6, ModR/M with reg=2
+            // NOT r16: 0xF7, ModR/M with reg=2
+            const notReg8Map = { 'al': 0, 'cl': 1, 'dl': 2, 'bl': 3, 'ah': 4, 'ch': 5, 'dh': 6, 'bh': 7 };
+            const notReg16Map = { 'ax': 0, 'cx': 1, 'dx': 2, 'bx': 3, 'sp': 4, 'bp': 5, 'si': 6, 'di': 7 };
+            if (notReg8Map.hasOwnProperty(operands[0])) {
+                const rm = notReg8Map[operands[0]];
+                return {
+                    address,
+                    opcode: 'NOT',
+                    operands: [operands[0].toUpperCase()],
+                    machineCode: [0xf6, (3 << 6) | (2 << 3) | rm],
+                    length,
+                    originalLine: originalLine.trim()
+                };
+            }
+            if (notReg16Map.hasOwnProperty(operands[0])) {
+                const rm = notReg16Map[operands[0]];
+                return {
+                    address,
+                    opcode: 'NOT',
+                    operands: [operands[0].toUpperCase()],
+                    machineCode: [0xf7, (3 << 6) | (2 << 3) | rm],
+                    length,
+                    originalLine: originalLine.trim()
+                };
+            }
+            break;
+        }
         case 'inc':
             if (operands[0] === 'al') {
                 return {
@@ -3308,6 +3387,42 @@ Assembler.prototype.parseInstruction = function(line, address) {
                 opcode: 'NOP',
                 operands: [],
                 machineCode: [0x90],
+                length,
+                originalLine: originalLine.trim()
+            };
+        case 'cbw':
+            return {
+                address,
+                opcode: 'CBW',
+                operands: [],
+                machineCode: [0x98],
+                length,
+                originalLine: originalLine.trim()
+            };
+        case 'cwd':
+            return {
+                address,
+                opcode: 'CWD',
+                operands: [],
+                machineCode: [0x99],
+                length,
+                originalLine: originalLine.trim()
+            };
+        case 'lahf':
+            return {
+                address,
+                opcode: 'LAHF',
+                operands: [],
+                machineCode: [0x9f],
+                length,
+                originalLine: originalLine.trim()
+            };
+        case 'sahf':
+            return {
+                address,
+                opcode: 'SAHF',
+                operands: [],
+                machineCode: [0x9e],
                 length,
                 originalLine: originalLine.trim()
             };

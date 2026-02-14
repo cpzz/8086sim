@@ -73,7 +73,37 @@ Assembler.prototype.getInstructionLength = function(line) {
     const opcodeEndIndex = lineWithoutComment.indexOf(' ');
     const opcode = opcodeEndIndex === -1 ? lineWithoutComment.toLowerCase() : lineWithoutComment.substring(0, opcodeEndIndex).toLowerCase();
     const operandsPart = opcodeEndIndex === -1 ? '' : lineWithoutComment.substring(opcodeEndIndex).trim();
-    const operands = operandsPart.split(/[,\s]+/).filter(Boolean).map(op => op.toLowerCase());
+    // 智能分割操作数：按逗号分割（保留 byte ptr / word ptr 等前缀），正确处理引号内的逗号
+    const operands = (function(str) {
+        const result = [];
+        let current = '';
+        let inQuote = false;
+        let quoteChar = '';
+        for (let i = 0; i < str.length; i++) {
+            const ch = str[i];
+            if (!inQuote && (ch === "'" || ch === '"')) {
+                inQuote = true;
+                quoteChar = ch;
+                current += ch;
+            } else if (inQuote && ch === quoteChar) {
+                inQuote = false;
+                current += ch;
+            } else if (!inQuote && ch === ',') {
+                const trimmed = current.trim();
+                if (trimmed.length > 0) {
+                    result.push(trimmed);
+                }
+                current = '';
+            } else {
+                current += ch;
+            }
+        }
+        const trimmed = current.trim();
+        if (trimmed.length > 0) {
+            result.push(trimmed);
+        }
+        return result;
+    })(operandsPart).map(op => op.toLowerCase());
 
     switch (opcode) {
         case 'nop':
@@ -101,6 +131,10 @@ Assembler.prototype.getInstructionLength = function(line) {
         case 'lock':
         case 'xlat':
         case 'leave':
+        case 'cbw':
+        case 'cwd':
+        case 'lahf':
+        case 'sahf':
         case 'movsb':
         case 'movsw':
         case 'cmpsb':
@@ -313,16 +347,57 @@ Assembler.prototype.getInstructionLength = function(line) {
             }
             // 默认情况：保守估计2字节
             return 2;
-        case 'mov':
+        case 'mov': {
             // 检查是否使用了 offset 操作符
             const hasOffset = /\boffset\s+/i.test(operandsPart);
+            
+            // 辅助函数：检查是否为内存操作数
+            const isMemoryOperandMov = (op) => {
+                const cleanOp = op.replace(/\b(byte|word)\s+ptr\s+/gi, '').trim();
+                return cleanOp.includes('[');
+            };
+            
+            // 辅助函数：估计内存操作数指令长度（opcode + ModR/M + displacement）
+            const estimateMemoryLengthMov = (op) => {
+                const cleanOp = op.replace(/\b(byte|word)\s+ptr\s+/gi, '').trim();
+                if (!cleanOp.includes('[')) return 0;
+                
+                const match = cleanOp.match(/\[(.*?)\]/);
+                if (!match) return 4; // 保守估计
+                
+                const inside = match[1].toLowerCase().trim();
+                
+                // 检查是否有 + 号（带位移的间接寻址）
+                if (inside.includes('+')) {
+                    const parts = inside.split('+');
+                    const lastPart = parts[parts.length - 1].trim();
+                    if (/^\d+$/.test(lastPart) || /^\d+[hH]$/.test(lastPart)) {
+                        const num = parseInt(lastPart.replace(/[hH]$/, ''), 
+                            lastPart.toLowerCase().endsWith('h') ? 16 : 10);
+                        if (num >= -128 && num <= 127) {
+                            return 3; // 短位移
+                        }
+                    }
+                    return 4; // 长位移或复杂位移
+                }
+                
+                // 寄存器间接寻址 [BX], [SI], [DI] 等
+                const regNames = ['ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'];
+                if (regNames.some(reg => inside === reg)) {
+                    return 2;
+                }
+                
+                // 直接地址 [1234H] 或 [label]
+                return 4;
+            };
             
             // 使用最坏情况长度策略
             if (this.isImmediate(operands[1])) {
                 // 立即数操作
-                if (operands[0].includes('[')) {
-                    // 内存寻址 + 立即数：最坏情况6字节
-                    return 6;
+                if (isMemoryOperandMov(operands[0])) {
+                    // 内存寻址 + 立即数：byte ptr 立即数1字节，word ptr 立即数2字节
+                    const isByte = /byte\s+ptr/i.test(operands[0]);
+                    return estimateMemoryLengthMov(operands[0]) + (isByte ? 1 : 2);
                 } else if (['ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'].includes(operands[0])) {
                     // 16位寄存器 + 立即数：3字节
                     return 3;
@@ -335,28 +410,29 @@ Assembler.prototype.getInstructionLength = function(line) {
                 }
             }
             // 检查是否是从数据段变量加载数据（例如 MOV DL, SINGLE_TOP_LEFT）
-                // 这种指令在8086中通常为4字节（8A /r modrm disp16）
-                else if (!operands[0].includes('[') && !operands[1].includes('[')) {
-                    // 检查第一个操作数是否是寄存器，第二个操作数是否是已知标签
-                    const isDestReg8 = ['al', 'ah', 'bl', 'bh', 'cl', 'ch', 'dl', 'dh'].includes(operands[0].toLowerCase());
-                    const isDestReg16 = ['ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'].includes(operands[0].toLowerCase());
-                    const isSrcLabel = this.symbols.hasOwnProperty(operands[1].toLowerCase());
-                    // 如果是寄存器到寄存器的操作，不是我们要处理的情况
-                    const isRegToReg = (isDestReg8 || isDestReg16) && 
-                                    (['al', 'ah', 'bl', 'bh', 'cl', 'ch', 'dl', 'dh', 'ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'].includes(operands[1].toLowerCase()));
-                    
-                    if ((isDestReg8 || isDestReg16) && !isRegToReg) {
-                        // 如果使用了 OFFSET，是立即数加载（3字节）
-                        // 否则是从内存读取（4字节）
-                        return hasOffset ? 3 : 4;
-                    }
+            // 这种指令在8086中通常为4字节（8A /r modrm disp16）
+            else if (!isMemoryOperandMov(operands[0]) && !isMemoryOperandMov(operands[1])) {
+                // 检查第一个操作数是否是寄存器，第二个操作数是否是已知标签
+                const isDestReg8 = ['al', 'ah', 'bl', 'bh', 'cl', 'ch', 'dl', 'dh'].includes(operands[0].toLowerCase());
+                const isDestReg16 = ['ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'].includes(operands[0].toLowerCase());
+                // 如果是寄存器到寄存器的操作，不是我们要处理的情况
+                const isRegToReg = (isDestReg8 || isDestReg16) && 
+                                (['al', 'ah', 'bl', 'bh', 'cl', 'ch', 'dl', 'dh', 'ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'].includes(operands[1].toLowerCase()));
+                
+                if ((isDestReg8 || isDestReg16) && !isRegToReg) {
+                    // 如果使用了 OFFSET，是立即数加载（3字节）
+                    // 否则是从内存读取（4字节）
+                    return hasOffset ? 3 : 4;
                 }
-            // 内存寻址操作：最坏情况4字节
-            if (operands[0].includes('[') || operands[1].includes('[')) {
-                return 4;
+            }
+            // 内存寻址操作：根据寻址模式估计长度
+            if (isMemoryOperandMov(operands[0]) || isMemoryOperandMov(operands[1])) {
+                const memOp = isMemoryOperandMov(operands[0]) ? operands[0] : operands[1];
+                return estimateMemoryLengthMov(memOp);
             }
             // 寄存器到寄存器：2字节
             return 2;
+        }
         case 'shl':
         case 'shr':
         case 'sal':
