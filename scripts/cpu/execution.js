@@ -1665,6 +1665,11 @@ CPU8086.prototype.step = function() {
             // 检查是否跳转到 BIOS 存根，如果是则执行内置处理函数
             if (newCS === this.biosHandlerBase && this.biosHandlers[newIP]) {
                 if (!this.biosHandlers[newIP]()) {
+                    if (!this.running) {
+                        // 程序退出（如 AH=4CH），不回退，保持 ip=0xFFFF
+                        instructionLength = 0;
+                        break;
+                    }
                     // 处理器需要阻塞（如等待键盘输入），回退：
                     // 恢复 SP/CS/IP/FLAGS，让 step 返回 false 以暂停
                     const savedIP = this.readMemory16(this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp')));
@@ -2657,12 +2662,20 @@ CPU8086.prototype.step = function() {
             this.writeMemory16(stackAddress9, this.getRegister('di'));
             instructionLength = 1;
             break;
-        case 0x16: // PUSH SS
-            this.setRegister('sp', this.getRegister('sp') - 2);
-            const stackAddress16 = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
-            this.writeMemory16(stackAddress16, this.getSegmentRegister('ss'));
-            instructionLength = 1;
+        case 0x16: { // PUSH SS
+            const nextByte16 = this.readMemory8(currentAddress + 1);
+            if (nextByte16 === 0x07 || nextByte16 === 0x17 || nextByte16 === 0x1f) {
+                const popSegMap16 = { 0x07: 'es', 0x17: 'ss', 0x1f: 'ds' };
+                this.setSegmentRegister(popSegMap16[nextByte16], this.getSegmentRegister('ss'));
+                instructionLength = 2;
+            } else {
+                this.setRegister('sp', this.getRegister('sp') - 2);
+                const stackAddress16 = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
+                this.writeMemory16(stackAddress16, this.getSegmentRegister('ss'));
+                instructionLength = 1;
+            }
             break;
+        }
         case 0x5e: // POP SI
             const stackAddress10 = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
             this.setRegister('si', this.readMemory16(stackAddress10));
@@ -3899,11 +3912,19 @@ CPU8086.prototype.step = function() {
         }
         case 0x06: // PUSH ES
         {
-            const spES = this.getRegister('sp') - 2;
-            this.setRegister('sp', spES & 0xFFFF);
-            const ssES = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
-            this.writeMemory16(ssES, this.getSegmentRegister('es'));
-            instructionLength = 1;
+            const nextByte06 = this.readMemory8(currentAddress + 1);
+            if (nextByte06 === 0x07 || nextByte06 === 0x17 || nextByte06 === 0x1f) {
+                // PUSH ES + POP seg = MOV seg, ES (2-byte pseudo-instruction)
+                const popSegMap06 = { 0x07: 'es', 0x17: 'ss', 0x1f: 'ds' };
+                this.setSegmentRegister(popSegMap06[nextByte06], this.getSegmentRegister('es'));
+                instructionLength = 2;
+            } else {
+                const spES = this.getRegister('sp') - 2;
+                this.setRegister('sp', spES & 0xFFFF);
+                const ssES = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
+                this.writeMemory16(ssES, this.getSegmentRegister('es'));
+                instructionLength = 1;
+            }
             break;
         }
         case 0x07: // POP ES
@@ -3916,11 +3937,19 @@ CPU8086.prototype.step = function() {
         }
         case 0x0e: // PUSH CS
         {
-            const spCS = this.getRegister('sp') - 2;
-            this.setRegister('sp', spCS & 0xFFFF);
-            const ssCS = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
-            this.writeMemory16(ssCS, this.getSegmentRegister('cs'));
-            instructionLength = 1;
+            const nextByte0e = this.readMemory8(currentAddress + 1);
+            if (nextByte0e === 0x07 || nextByte0e === 0x17 || nextByte0e === 0x1f) {
+                // PUSH CS + POP seg = MOV seg, CS (2-byte pseudo-instruction)
+                const popSegMap0e = { 0x07: 'es', 0x17: 'ss', 0x1f: 'ds' };
+                this.setSegmentRegister(popSegMap0e[nextByte0e], this.getSegmentRegister('cs'));
+                instructionLength = 2;
+            } else {
+                const spCS = this.getRegister('sp') - 2;
+                this.setRegister('sp', spCS & 0xFFFF);
+                const ssCS = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
+                this.writeMemory16(ssCS, this.getSegmentRegister('cs'));
+                instructionLength = 1;
+            }
             break;
         }
         case 0x17: // POP SS
@@ -3933,11 +3962,19 @@ CPU8086.prototype.step = function() {
         }
         case 0x1e: // PUSH DS
         {
-            const spDS = this.getRegister('sp') - 2;
-            this.setRegister('sp', spDS & 0xFFFF);
-            const ssDS = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
-            this.writeMemory16(ssDS, this.getSegmentRegister('ds'));
-            instructionLength = 1;
+            const nextByte1e = this.readMemory8(currentAddress + 1);
+            if (nextByte1e === 0x07 || nextByte1e === 0x17 || nextByte1e === 0x1f) {
+                // PUSH DS + POP seg = MOV seg, DS (2-byte pseudo-instruction)
+                const popSegMap1e = { 0x07: 'es', 0x17: 'ss', 0x1f: 'ds' };
+                this.setSegmentRegister(popSegMap1e[nextByte1e], this.getSegmentRegister('ds'));
+                instructionLength = 2;
+            } else {
+                const spDS = this.getRegister('sp') - 2;
+                this.setRegister('sp', spDS & 0xFFFF);
+                const ssDS = this.getMemoryAddress(this.getSegmentRegister('ss'), this.getRegister('sp'));
+                this.writeMemory16(ssDS, this.getSegmentRegister('ds'));
+                instructionLength = 1;
+            }
             break;
         }
         case 0x1f: // POP DS

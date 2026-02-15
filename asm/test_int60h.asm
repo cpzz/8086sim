@@ -4,7 +4,7 @@ STACK   SEGMENT STACK
 STACK   ENDS
 
 DATA    SEGMENT
-    MSG     DB '自定义中断程序执行！$'
+    MSG     DB 'INT 60H test! $'
     OLD_INT60 DW 0, 0  ; 保存原INT 60H向量（偏移+段地址）
 DATA    ENDS
 

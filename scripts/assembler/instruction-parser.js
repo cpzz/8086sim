@@ -1197,25 +1197,24 @@ Assembler.prototype.parseInstruction = function(line, address) {
                     originalLine: originalLine.trim()
                 };
             }
-            // MOV 段寄存器到段寄存器（伪指令：通过AX中转，生成2条指令）
+            // MOV 段寄存器到段寄存器（伪指令：PUSH src / POP dst，不破坏任何寄存器）
             {
                 const segRegs = ['es', 'cs', 'ss', 'ds'];
-                const segRegCode = { 'es': 0, 'cs': 1, 'ss': 2, 'ds': 3 };
+                const pushSegOp = { 'es': 0x06, 'cs': 0x0e, 'ss': 0x16, 'ds': 0x1e };
+                const popSegOp = { 'es': 0x07, 'ss': 0x17, 'ds': 0x1f };
                 if (segRegs.includes(operands[0]) && segRegs.includes(operands[1])) {
-                    const src = segRegCode[operands[1]];
-                    const dst = segRegCode[operands[0]];
-                    // MOV AX, Sreg2 (8C mod=11, reg=sreg2, rm=000)
-                    const modrm1 = 0xc0 | (src << 3);
-                    // MOV Sreg1, AX (8E mod=11, reg=sreg1, rm=000)
-                    const modrm2 = 0xc0 | (dst << 3);
-                    return {
-                        address,
-                        opcode: 'MOV',
-                        operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
-                        machineCode: [0x8c, modrm1, 0x8e, modrm2],
-                        length,
-                        originalLine: originalLine.trim()
-                    };
+                    const pushOp = pushSegOp[operands[1]];
+                    const popOp = popSegOp[operands[0]];
+                    if (pushOp !== undefined && popOp !== undefined) {
+                        return {
+                            address,
+                            opcode: 'MOV',
+                            operands: [operands[0].toUpperCase(), operands[1].toUpperCase()],
+                            machineCode: [pushOp, popOp],
+                            length,
+                            originalLine: originalLine.trim()
+                        };
+                    }
                 }
             }
             // 支持MOV 标签/标签+偏移, 寄存器/段寄存器 格式（如 MOV NUM, AX 或 MOV OLD_INT60+2, ES）

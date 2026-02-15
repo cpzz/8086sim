@@ -918,11 +918,11 @@ table.register-table td.register-changed {
 
 /* 当前指令行 */
 .instructions-table-row.current {
-    background-color: #e6f4ea; /* 淡绿背景 */
+    background-color: #e3f2fd; /* 淡蓝背景 */
     font-weight: 700;
     color: #000;
-    border-left: 6px solid #34a853 !important; /* 绿色左边框 */
-    box-shadow: 0 2px 4px rgba(52, 168, 83, 0.15);
+    border-left: 6px solid #1976d2 !important; /* 蓝色左边框 */
+    box-shadow: 0 2px 4px rgba(25, 118, 210, 0.15);
 }
 
 .instructions-table-row.current .instructions-table-cell {
@@ -1096,7 +1096,8 @@ table.register-table td.register-changed {
 
 .memory-row {
     display: flex;
-    height: 28px;
+    min-height: 28px;
+    line-height: 24px;
     align-items: center;
     border-bottom: 1px solid #f1f3f4;
 }

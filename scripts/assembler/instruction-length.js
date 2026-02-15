@@ -421,8 +421,8 @@ Assembler.prototype.getInstructionLength = function(line) {
                 const isOp0Seg = segRegsLen.includes(operands[0].toLowerCase());
                 const isOp1Seg = segRegsLen.includes(operands[1].toLowerCase());
                 if (isOp0Seg || isOp1Seg) {
-                    // 段寄存器到段寄存器 = 4字节（通过AX中转）
-                    if (isOp0Seg && isOp1Seg) return 4;
+                    // 段寄存器到段寄存器 = 2字节（PUSH src / POP dst）
+                    if (isOp0Seg && isOp1Seg) return 2;
                     // 确认另一个操作数是通用寄存器才返回2字节
                     const gpRegs = ['ax', 'bx', 'cx', 'dx', 'si', 'di', 'bp', 'sp'];
                     const otherOp = isOp1Seg ? operands[0].toLowerCase() : operands[1].toLowerCase();
