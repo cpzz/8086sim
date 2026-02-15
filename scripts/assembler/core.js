@@ -351,7 +351,6 @@ class Assembler {
             }
 
             const instrLen = this.getInstructionLength(line);
-            console.log(`[Pass1] addr=0x${address.toString(16).padStart(4,'0')} len=${instrLen} line="${line}"`);
             address += instrLen;
         }
 
@@ -407,7 +406,6 @@ class Assembler {
             // 记录地址，然后根据 getInstructionLength() 增加地址
             lineAddresses[i] = address;
             const instrLen = this.getInstructionLength(line);
-            console.log(`[Pass1.5] addr=0x${address.toString(16).padStart(4,'0')} len=${instrLen} line="${line}"`);
             address += instrLen;
         }
 
@@ -697,11 +695,6 @@ class Assembler {
                 this.instructions.push(instruction);
                 // 写入内存
                 this.writeInstructionToMemory(instruction);
-                const expectedLen = this.getInstructionLength(line);
-                if (instruction.length !== expectedLen) {
-                    console.warn(`[Pass2 MISMATCH] addr=0x${address.toString(16).padStart(4,'0')} instrLen=${instruction.length} vs getInstructionLength=${expectedLen} line="${line}" machineCode=[${instruction.machineCode.map(b=>'0x'+b.toString(16).padStart(2,'0')).join(',')}]`);
-                }
-                console.log(`[Pass2] addr=0x${address.toString(16).padStart(4,'0')} len=${instruction.length} line="${line}" machineCode=[${instruction.machineCode.map(b=>'0x'+b.toString(16).padStart(2,'0')).join(',')}]`);
                 address += instruction.length;
             } else {
                 // 对于不生成机器码的伪指令
@@ -781,11 +774,9 @@ class Assembler {
     writeCodeSegmentToMemory(cpu) {
         const cs = cpu.getSegmentRegister('cs');
         const codeSegmentBase = (cs << 4);
-        console.log(`[writeCodeSeg] CS=0x${cs.toString(16)} base=0x${codeSegmentBase.toString(16)} instrCount=${this.instructions.length}`);
 
         for (const instruction of this.instructions) {
             const instructionAddress = codeSegmentBase + instruction.address;
-            console.log(`[writeCodeSeg] writing ${instruction.machineCode.length} bytes at phys=0x${instructionAddress.toString(16)} offset=0x${instruction.address.toString(16)} code=[${instruction.machineCode.map(b=>'0x'+b.toString(16).padStart(2,'0')).join(',')}]`);
             for (let i = 0; i < instruction.machineCode.length; i++) {
                 this.memory.write8(instructionAddress + i, instruction.machineCode[i]);
             }
@@ -796,13 +787,6 @@ class Assembler {
             for (let i = 0; i < data.data.length; i++) {
                 this.memory.write8(dataAddress + i, data.data[i]);
             }
-        }
-        // 验证写入是否成功
-        if (this.instructions.length > 0) {
-            const firstInstr = this.instructions[0];
-            const verifyAddr = codeSegmentBase + firstInstr.address;
-            const readBack = this.memory.read8(verifyAddr);
-            console.log(`[writeCodeSeg VERIFY] phys=0x${verifyAddr.toString(16)} expected=0x${firstInstr.machineCode[0].toString(16)} got=0x${readBack.toString(16)}`);
         }
     }
 

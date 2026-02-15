@@ -4164,7 +4164,6 @@ CPU8086.prototype.step = function() {
 
     // 更新指令指针（某些指令已经设置了IP，instructionLength会设为0）
     if (instructionLength > 0) {
-        console.log(`[CPU] CS:${this.getSegmentRegister('cs').toString(16)} IP:0x${this.ip.toString(16).padStart(4,'0')} opcode=0x${opcode.toString(16).padStart(2,'0')} instrLen=${instructionLength} -> newIP=0x${(this.ip+instructionLength).toString(16).padStart(4,'0')}`);
         this.ip += instructionLength;
     }
 

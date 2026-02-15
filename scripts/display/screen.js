@@ -94,7 +94,15 @@ function initScreen() {
                 if (currentMemorySegment === 'ivt') {
                     updateIvtDisplay();
                 } else {
-                    updateMemoryDisplay(0x0000);
+                    // 恢复该段上次浏览的位置
+                    const savedOffset = segmentMemoryOffsets[currentMemorySegment];
+                    if (savedOffset !== undefined && savedOffset !== null) {
+                        updateMemoryDisplay(savedOffset);
+                    } else if (currentMemorySegment === 'ss') {
+                        updateMemoryDisplay(cpu.getRegister('sp') & 0xFFF0);
+                    } else {
+                        updateMemoryDisplay(0x0000);
+                    }
                 }
             }
         });
@@ -124,7 +132,15 @@ function initScreen() {
                 memoryGrid.style.display = '';
                 ivtGrid.style.display = 'none';
                 if (memoryControls) memoryControls.style.display = '';
-                updateMemoryDisplay(0x0000);
+                // 恢复该段上次浏览的位置
+                const savedOffset = segmentMemoryOffsets[currentMemorySegment];
+                if (savedOffset !== undefined && savedOffset !== null) {
+                    updateMemoryDisplay(savedOffset);
+                } else if (currentMemorySegment === 'ss') {
+                    updateMemoryDisplay(cpu.getRegister('sp') & 0xFFF0);
+                } else {
+                    updateMemoryDisplay(0x0000);
+                }
             }
         });
     });

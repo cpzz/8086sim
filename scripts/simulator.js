@@ -6,6 +6,7 @@ let instructions = [];
 let breakpoints = new Set();
 let currentMemorySegment = 'cs'; // 当前选中的内存段
 let currentMemoryOffset = 0; // 当前内存显示的偏移地址
+let segmentMemoryOffsets = { cs: 0, ds: 0, ss: null, es: 0 }; // 每个段独立记录偏移，null表示未初始化
 let currentLeftTab = 'screen'; // 当前选中的左侧tab: screen, registers, memory
 let previousRegisterValues = {}; // 存储上一次的寄存器值
 let hasExecuted = false; // 跟踪是否已经执行了指令
@@ -22,14 +23,23 @@ let previousSegmentValues = { cs: 0x1000, ds: 0x2000, ss: 0x3000, es: 0x4000 }; 
 // 获取当前段的内存显示偏移地址
 function getMemoryDisplayOffset() {
     const seg = currentMemorySegment;
-    if (cpu.lastSegmentAccessAddress[seg] >= 0) {
-        const base = cpu.getSegmentRegister(seg) << 4;
-        const offset = cpu.lastSegmentAccessAddress[seg] - base;
-        if (offset >= 0 && offset < 65536) {
-            return offset & 0xFFF0; // 对齐到16字节
+    // 如果该段有保存的偏移，优先使用
+    if (segmentMemoryOffsets[seg] !== undefined && segmentMemoryOffsets[seg] !== null) {
+        // 检查是否有新的内存访问需要跟踪
+        if (cpu.lastSegmentAccessAddress[seg] >= 0) {
+            const base = cpu.getSegmentRegister(seg) << 4;
+            const offset = cpu.lastSegmentAccessAddress[seg] - base;
+            if (offset >= 0 && offset < 65536 && offset !== 0) {
+                return offset & 0xFFF0;
+            }
         }
+        return segmentMemoryOffsets[seg];
     }
-    return currentMemoryOffset;
+    // SS段默认显示SP附近
+    if (seg === 'ss') {
+        return cpu.getRegister('sp') & 0xFFF0;
+    }
+    return 0;
 }
 
 // 检查段寄存器是否发生变化
@@ -333,6 +343,9 @@ function resetSimulator() {
     currentStepOperationAddresses = { cs: { reads: new Set(), writes: new Set() }, ds: { reads: new Set(), writes: new Set() }, ss: { reads: new Set(), writes: new Set() }, es: { reads: new Set(), writes: new Set() } };
     executionStepCounter = 0;
 
+    // 重置每段内存偏移记录
+    segmentMemoryOffsets = { cs: 0, ds: 0, ss: null, es: 0 };
+
     // 清除上一次的寄存器值，确保重置后不会高亮
     previousRegisterValues = {};
     // 重置段寄存器跟踪
@@ -396,7 +409,16 @@ function resetSimulator() {
     }
 
     updateRegistersDisplay();
-    updateMemoryDisplay(0x0000);
+    {
+        const savedOffset = segmentMemoryOffsets[currentMemorySegment];
+        if (savedOffset !== null && savedOffset !== undefined) {
+            updateMemoryDisplay(savedOffset);
+        } else if (currentMemorySegment === 'ss') {
+            updateMemoryDisplay(cpu.getRegister('sp') & 0xFFF0);
+        } else {
+            updateMemoryDisplay(0x0000);
+        }
+    }
     updateInstructionsDisplay(); // 更新指令列表显示，高亮当前指令
     updateDisplayOutput(); // 清空屏幕显示
     resetIvtSnapshot(); // 复位后重置IVT快照，避免误标变化
@@ -456,6 +478,9 @@ function handleFileLoad(e) {
             currentStepOperationAddresses = { cs: { reads: new Set(), writes: new Set() }, ds: { reads: new Set(), writes: new Set() }, ss: { reads: new Set(), writes: new Set() }, es: { reads: new Set(), writes: new Set() } };
             executionStepCounter = 0;
 
+            // 重置每段内存偏移记录
+            segmentMemoryOffsets = { cs: 0, ds: 0, ss: null, es: 0 };
+
             // 如果有指令，设置CPU的指令指针指向入口点
             if (instructions.length > 0) {
                 // 如果汇编器指定了入口点（如 end main），则使用入口点
@@ -497,7 +522,14 @@ function handleFileLoad(e) {
             // 保持当前选中的内存段不变
             // 只有当当前显示的是内存tab时，才更新内存显示
             if (currentLeftTab === 'memory') {
-                updateMemoryDisplay(0x0000);
+                const savedOffset = segmentMemoryOffsets[currentMemorySegment];
+                if (savedOffset !== null && savedOffset !== undefined) {
+                    updateMemoryDisplay(savedOffset);
+                } else if (currentMemorySegment === 'ss') {
+                    updateMemoryDisplay(cpu.getRegister('sp') & 0xFFF0);
+                } else {
+                    updateMemoryDisplay(0x0000);
+                }
             }
             updateDisplayOutput(); // 清空屏幕显示
             resetIvtSnapshot(); // 加载文件后重置IVT快照，避免误标变化
@@ -539,7 +571,16 @@ function init() {
     // 更新显示
     updateScreenDisplay();
     updateRegistersDisplay();
-    updateMemoryDisplay(0x0000);
+    {
+        const savedOffset = segmentMemoryOffsets[currentMemorySegment];
+        if (savedOffset !== null && savedOffset !== undefined) {
+            updateMemoryDisplay(savedOffset);
+        } else if (currentMemorySegment === 'ss') {
+            updateMemoryDisplay(cpu.getRegister('sp') & 0xFFF0);
+        } else {
+            updateMemoryDisplay(0x0000);
+        }
+    }
     updateInstructionsDisplay();
     updateIvtDisplay();
 }

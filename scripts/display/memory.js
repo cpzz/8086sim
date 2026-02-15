@@ -105,6 +105,7 @@ function updateMemoryDisplay(offsetAddress) {
     // 限制偏移地址在有效范围内
     const clampedOffset = Math.max(0, Math.min(offsetAddress, 0xFFFF)) & 0xFFF0; // 对齐到16字节
     currentMemoryOffset = clampedOffset;
+    segmentMemoryOffsets[currentMemorySegment] = clampedOffset;
 
     // 堆栈段特殊处理
     const isStack = (currentMemorySegment === 'ss');
@@ -263,6 +264,7 @@ function updateMemoryDisplay(offsetAddress) {
             } else {
                 currentMemoryOffset = clampedRow * 16;
             }
+            segmentMemoryOffsets[currentMemorySegment] = currentMemoryOffset;
         });
     }
 

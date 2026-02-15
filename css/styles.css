@@ -918,11 +918,11 @@ table.register-table td.register-changed {
 
 /* 当前指令行 */
 .instructions-table-row.current {
-    background-color: #e3f2fd; /* 淡蓝背景 */
+    background-color: #fff9c4; /* 黄色背景，与内存CS段当前指令一致 */
     font-weight: 700;
     color: #000;
-    border-left: 6px solid #1976d2 !important; /* 蓝色左边框 */
-    box-shadow: 0 2px 4px rgba(25, 118, 210, 0.15);
+    border-left: 6px solid #ffb300 !important; /* 金色左边框 */
+    box-shadow: 0 2px 4px rgba(255, 179, 0, 0.15);
 }
 
 .instructions-table-row.current .instructions-table-cell {
