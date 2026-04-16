@@ -5,10 +5,65 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>8086 CPU 模拟器</title>
     <link rel="stylesheet" href="css/styles.css">
+    <script>
+      // Restore saved theme before first paint
+      (function() {
+        var t = localStorage.getItem('8086sim-theme') || 'dark';
+        if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+      })();
+    </script>
 </head>
 <body>
     <div class="container">
-        <h1>8086 CPU 模拟器</h1>
+        <header class="app-header">
+            <div class="app-header-brand">
+                <h1>8086 处理器模拟器</h1>
+            </div>
+            <div style="display:flex;align-items:center;gap:14px;">
+                <div class="theme-toggle" id="theme-toggle" role="switch" aria-checked="true" aria-label="切换深色/浅色模式" tabindex="0">
+                    <span class="theme-toggle-label" id="theme-label">DARK</span>
+                    <div class="theme-toggle-track active" id="theme-track">
+                        <div class="theme-toggle-thumb"></div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <script>
+          (function() {
+            var track  = document.getElementById('theme-track');
+            var label  = document.getElementById('theme-label');
+            var toggle = document.getElementById('theme-toggle');
+            var root   = document.documentElement;
+
+            function applyTheme(theme) {
+              if (theme === 'light') {
+                root.setAttribute('data-theme', 'light');
+                track.classList.remove('active');
+                label.textContent = 'LIGHT';
+                toggle.setAttribute('aria-checked', 'false');
+              } else {
+                root.removeAttribute('data-theme');
+                track.classList.add('active');
+                label.textContent = 'DARK';
+                toggle.setAttribute('aria-checked', 'true');
+              }
+            }
+
+            applyTheme(localStorage.getItem('8086sim-theme') || 'dark');
+
+            function handleToggle() {
+              var next = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+              localStorage.setItem('8086sim-theme', next);
+              applyTheme(next);
+            }
+
+            toggle.addEventListener('click', handleToggle);
+            toggle.addEventListener('keydown', function(e) {
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleToggle(); }
+            });
+          })();
+        </script>
 
         <!-- 主内容区：左右布局 -->
         <div class="main-content">
